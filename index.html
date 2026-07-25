@@ -42,23 +42,25 @@
     <!-- Sidebar -->
     <aside class="sidebar">
       <div class="sidebar-brand">
-        <i class="bi bi-cash-coin"></i>
+        <div class="brand-icon"><i class="bi bi-cash-coin"></i></div>
         <span>Planificación<br />Financiera</span>
       </div>
       <nav class="sidebar-nav">
-        <a href="#" class="nav-link active" data-view="dashboard"><i class="bi bi-speedometer2"></i> Consolidado</a>
-        <a href="#" class="nav-link" data-view="categorias-view"><i class="bi bi-diagram-3"></i> Por categoría</a>
-        <a href="#" class="nav-link" data-view="proyectos"><i class="bi bi-building"></i> Por proyecto</a>
-        <a href="#" class="nav-link" data-view="importar"><i class="bi bi-file-earmark-arrow-up"></i> Importar Excel</a>
-        <a href="#" class="nav-link" data-view="caja"><i class="bi bi-bank"></i> Caja del banco</a>
-        <a href="#" class="nav-link" data-view="pagos"><i class="bi bi-calendar-check"></i> Programar pagos</a>
-        <a href="#" class="nav-link" data-view="reportes"><i class="bi bi-file-earmark-bar-graph"></i> Reportes</a>
-        <a href="#" class="nav-link" data-view="config"><i class="bi bi-gear"></i> Configuración</a>
+        <a href="#" class="nav-link active" data-view="dashboard"><i class="bi bi-speedometer2"></i> <span>Consolidado</span></a>
+        <a href="#" class="nav-link" data-view="categorias-view"><i class="bi bi-diagram-3"></i> <span>Por categoría</span></a>
+        <a href="#" class="nav-link" data-view="flujo-mensual"><i class="bi bi-table"></i> <span>Flujo de Caja</span></a>
+        <a href="#" class="nav-link" data-view="resumen-directorio"><i class="bi bi-easel2"></i> <span>Resumen Directorio</span></a>
+        <a href="#" class="nav-link" data-view="proyectos"><i class="bi bi-building"></i> <span>Por proyecto</span></a>
+        <a href="#" class="nav-link" data-view="importar"><i class="bi bi-file-earmark-arrow-up"></i> <span>Importar Excel</span></a>
+        <a href="#" class="nav-link" data-view="caja"><i class="bi bi-bank"></i> <span>Caja del banco</span></a>
+        <a href="#" class="nav-link" data-view="pagos"><i class="bi bi-calendar-check"></i> <span>Programar pagos</span></a>
+        <a href="#" class="nav-link" data-view="reportes"><i class="bi bi-file-earmark-bar-graph"></i> <span>Reportes</span></a>
+        <a href="#" class="nav-link" data-view="config"><i class="bi bi-gear"></i> <span>Configuración</span></a>
       </nav>
       <div class="sidebar-footer">
         <div id="mode-badge" class="badge-mode"></div>
         <div id="user-box" class="user-box d-none">
-          <span id="user-email" class="small text-truncate"></span>
+          <span id="user-email" class="text-truncate"></span>
           <button id="logout-btn" class="btn btn-sm btn-link text-muted p-0" title="Salir"><i class="bi bi-box-arrow-right"></i></button>
         </div>
       </div>
@@ -67,10 +69,12 @@
     <!-- Main -->
     <main class="main">
       <header class="topbar">
-        <h5 id="view-title" class="mb-0">Consolidado</h5>
+        <div>
+          <h1 id="view-title">Consolidado</h1>
+          <div id="view-subtitle" class="topbar-subtitle">Flujo de caja consolidado de proyectos · moneda UF</div>
+        </div>
         <div class="topbar-actions">
-          <span class="text-muted small me-2">Moneda:</span>
-          <span id="moneda-label" class="badge bg-secondary">UF</span>
+          <div id="topbar-stats" class="topbar-stats"></div>
         </div>
       </header>
 
@@ -78,6 +82,8 @@
         <!-- Cada vista es un <section> con id; app.js muestra/oculta -->
         <section id="dashboard" class="view"></section>
         <section id="categorias-view" class="view d-none"></section>
+        <section id="flujo-mensual" class="view d-none"></section>
+        <section id="resumen-directorio" class="view d-none"></section>
         <section id="proyectos" class="view d-none"></section>
         <section id="importar" class="view d-none"></section>
         <section id="caja" class="view d-none"></section>

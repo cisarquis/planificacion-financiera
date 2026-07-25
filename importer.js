@@ -107,8 +107,137 @@
     return { proyeccion, meta: { total, count, minMonth, maxMonth } };
   }
 
+  // Normaliza texto para comparar nombres de hoja/categoría/proyecto de forma tolerante
+  // (minúsculas, sin tildes, sin puntuación).
+  function normalizeLabel(s) {
+    return String(s || '')
+      .toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+  }
+
+  // Columnas de mes de la fila de encabezado de una hoja "maestro" (una hoja por categoría,
+  // una fila por proyecto). Descarta columnas iniciales aisladas (salto > ~70 días a la
+  // siguiente): son acumulados históricos previos, no meses secuenciales a importar.
+  function monthColumns(grid, headerRow) {
+    const row = grid[headerRow] || [];
+    const cols = [];
+    for (let c = 0; c < row.length; c++) {
+      const d = cellToDate(row[c]);
+      if (d) cols.push({ col: c, key: dateToMonthKey(d), time: d.getTime() });
+    }
+    cols.sort((a, b) => a.time - b.time);
+    const GAP = 70 * 86400000;
+    while (cols.length > 1 && (cols[1].time - cols[0].time) > GAP) cols.shift();
+    return cols;
+  }
+
+  // Extrae { nombre, tipo, proyeccion } de cada fila de proyecto bajo la fila de encabezado.
+  // Descarta filas sin nombre y filas sin ninguna celda numérica real en las columnas de mes
+  // (esto filtra filas de título/rótulo repetidas, que no tienen números, sin descartar
+  // proyectos con flujo en cero explícito).
+  function extractMasterRows(grid, headerRow) {
+    const cols = monthColumns(grid, headerRow);
+    const rows = [];
+    for (let r = headerRow + 1; r < grid.length; r++) {
+      const row = grid[r] || [];
+      const nombre = typeof row[0] === 'string' ? row[0].trim() : '';
+      if (!nombre) continue;
+      const tipo = typeof row[1] === 'string' ? row[1].trim() : '';
+      const proyeccion = {};
+      let any = false;
+      cols.forEach(({ col, key }) => {
+        const v = row[col];
+        if (typeof v === 'number' && !isNaN(v)) { proyeccion[key] = (proyeccion[key] || 0) + v; any = true; }
+      });
+      if (!any) continue;
+      rows.push({ nombre, tipo, proyeccion });
+    }
+    return { cols, rows };
+  }
+
+  // Reconoce encabezados de semestre en texto literal: "1S 2026", "2S2026", etc.
+  function parseSemesterLabel(cell) {
+    if (typeof cell !== 'string') return null;
+    const m = cell.trim().match(/^([12])\s*s\.?\s*(\d{4})$/i);
+    if (!m) return null;
+    return { sem: +m[1], year: +m[2] };
+  }
+
+  // Fila con más celdas que matchean parseSemesterLabel (equivalente a detectRows, pero para
+  // archivos de presupuesto semestral en vez de mensual).
+  function detectSemesterHeaderRow(grid) {
+    let best = -1, bestCount = 0;
+    for (let r = 0; r < grid.length; r++) {
+      const row = grid[r] || [];
+      let count = 0;
+      for (const cell of row) if (parseSemesterLabel(cell)) count++;
+      if (count > bestCount) { bestCount = count; best = r; }
+    }
+    return best;
+  }
+
+  // Columnas de semestre de la fila de encabezado: cada una trae sus 6 meses (ene-jun / jul-dic).
+  function semesterColumns(grid, headerRow) {
+    const row = grid[headerRow] || [];
+    const cols = [];
+    for (let c = 0; c < row.length; c++) {
+      const s = parseSemesterLabel(row[c]);
+      if (!s) continue;
+      const start = s.sem === 1 ? 1 : 7;
+      const monthKeys = [];
+      for (let m = start; m < start + 6; m++) monthKeys.push(s.year + '-' + String(m).padStart(2, '0'));
+      cols.push({ col: c, monthKeys });
+    }
+    return cols;
+  }
+
+  // Busca, entre las primeras columnas, la que marca fila de proyecto real ("Sí"/"No"). Devuelve
+  // -1 si el archivo no tiene esa columna (no se filtra ninguna fila en ese caso).
+  function detectFlagColumn(grid, headerRow) {
+    let best = -1, bestCount = 0;
+    for (let c = 0; c < 4; c++) {
+      let count = 0;
+      for (let r = headerRow + 1; r < grid.length; r++) {
+        const v = (grid[r] || [])[c];
+        if (typeof v === 'string' && /^(s[ií]|no)$/i.test(v.trim())) count++;
+      }
+      if (count > bestCount) { bestCount = count; best = c; }
+    }
+    return bestCount > 0 ? best : -1;
+  }
+
+  // Extrae { nombre, presupuesto } de cada fila de proyecto real (columna de flag = "Sí", o sin
+  // filtro si el archivo no trae esa columna). Reparte cada valor semestral en partes iguales
+  // entre sus 6 meses — el archivo no da más precisión que eso.
+  function extractPresupuestoRows(grid, headerRow, flagCol) {
+    const cols = semesterColumns(grid, headerRow);
+    const rows = [];
+    for (let r = headerRow + 1; r < grid.length; r++) {
+      const row = grid[r] || [];
+      const nombre = typeof row[0] === 'string' ? row[0].trim() : '';
+      if (!nombre) continue;
+      if (flagCol >= 0 && !/^s[ií]$/i.test(String(row[flagCol] || '').trim())) continue;
+      const presupuesto = {};
+      let any = false;
+      cols.forEach(({ col, monthKeys }) => {
+        const v = row[col];
+        if (typeof v !== 'number' || isNaN(v)) return;
+        any = true;
+        const share = v / monthKeys.length;
+        monthKeys.forEach((k) => { presupuesto[k] = (presupuesto[k] || 0) + share; });
+      });
+      if (!any) continue;
+      rows.push({ nombre, presupuesto });
+    }
+    return { cols, rows };
+  }
+
   window.PFImporter = {
     parseFile, sheetToGrid, cellToDate, dateToMonthKey,
     detectRows, rowLabel, extractProjection,
+    normalizeLabel, monthColumns, extractMasterRows,
+    parseSemesterLabel, detectSemesterHeaderRow, semesterColumns, detectFlagColumn, extractPresupuestoRows,
   };
 })();

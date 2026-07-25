@@ -10,6 +10,7 @@
 //   config/global            { cajaInicial, mesInicial:'YYYY-MM', moneda, umbralAlerta }
 //   categorias/{id}          { nombre, orden }
 //   proyectos/{id}           { nombre, categoriaId, moneda, proyeccion:{'YYYY-MM':neto},
+//                              presupuesto:{'YYYY-MM':neto} (línea base, se carga una sola vez),
 //                              ultimaImportacion, createdAt, updatedAt }
 //   cajaReal/{YYYY-MM}       { monto, nota }
 //   importLog/{id}           { projId, fileName, sheet, meses, importedAt, byEmail }
@@ -17,11 +18,11 @@
 
 (function () {
   const CATEGORIAS_SEMILLA = [
-    'Proyectos propios',
-    'Con terceros',
-    'Hoteles',
-    'Multifamily',
-    'Evaluación',
+    'Inmobiliaria Ingevec',
+    'Inmobiliarias Asociadas',
+    'Inv. y Rentas',
+    'Financiamiento, Dividendo e Impuestos',
+    'Otros',
   ];
 
   const CONFIG_DEFAULT = {
@@ -88,7 +89,7 @@
     },
     async addProyecto(data) {
       const list = this._get('proyectos', []);
-      const p = Object.assign({ id: uid('pr_'), proyeccion: {}, createdAt: Date.now() }, data, { updatedAt: Date.now() });
+      const p = Object.assign({ id: uid('pr_'), proyeccion: {}, presupuesto: {}, createdAt: Date.now() }, data, { updatedAt: Date.now() });
       list.push(p);
       this._set('proyectos', list);
       return p;
@@ -165,7 +166,7 @@
       return snap.exists ? Object.assign({ id: snap.id }, snap.data()) : null;
     },
     async addProyecto(data) {
-      const payload = Object.assign({ proyeccion: {}, createdAt: Date.now(), updatedAt: Date.now() }, data);
+      const payload = Object.assign({ proyeccion: {}, presupuesto: {}, createdAt: Date.now(), updatedAt: Date.now() }, data);
       const ref = await this.db.collection('proyectos').add(payload);
       return Object.assign({ id: ref.id }, payload);
     },
@@ -221,15 +222,18 @@
       return this.mode;
     },
 
-    // Siembra las 5 categorías la primera vez.
+    // Asegura que las 5 categorías estándar existan (por nombre, idempotente) — no solo la
+    // primera vez: si queda alguna categoría de una versión anterior y se borran las demás,
+    // esto repone las que falten sin duplicar las que ya están.
     async ensureSeed() {
       const cats = await this.backend.listCategorias();
-      if (!cats.length) {
-        for (const nombre of CATEGORIAS_SEMILLA) {
-          await this.backend.addCategoria(nombre);
-        }
+      const nombres = new Set(cats.map((c) => c.nombre));
+      for (const nombre of CATEGORIAS_SEMILLA) {
+        if (!nombres.has(nombre)) await this.backend.addCategoria(nombre);
       }
     },
+
+    categoriasSemilla: CATEGORIAS_SEMILLA,
   };
 
   // Reexporta cada método del backend en la fachada.
