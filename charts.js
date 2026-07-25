@@ -17,9 +17,12 @@
     return el ? el.getContext('2d') : null;
   }
 
-  // Formato corto de eje/tooltip (usa PF.fmtMoney si existe).
+  // Formato corto de eje/tooltip (usa PF.fmtNum si existe; negativos entre paréntesis).
   function fmt(v) {
-    return (window.PF && PF.fmtNum) ? PF.fmtNum(v) : Math.round(v).toLocaleString('es-CL');
+    if (window.PF && PF.fmtNum) return PF.fmtNum(v);
+    const r = Math.round(v);
+    const s = Math.abs(r).toLocaleString('es-CL');
+    return r < 0 ? '(' + s + ')' : s;
   }
 
   const COLORS = {
@@ -87,24 +90,72 @@
     return registry[canvasId];
   }
 
-  // Combo barras + líneas: Inversión (flujo de obra) Actual vs Presupuesto, por período y acumulado.
-  function comboInversionVsPpto(canvasId, labels, actual, ppto, actualAcum, pptoAcum) {
+  // Barras agrupadas Actual vs Ppto por año, con el valor de cada barra como etiqueta
+  // (plugin inline, sin dependencias externas) — "Inversión en obras del período".
+  function barInversionPeriodo(canvasId, labels, actual, ppto) {
     destroy(canvasId);
     const c = ctx(canvasId); if (!c) return;
+    const dataLabelsPlugin = {
+      id: 'pfBarLabels',
+      afterDatasetsDraw(chart) {
+        const g = chart.ctx;
+        chart.data.datasets.forEach((ds, dsIdx) => {
+          chart.getDatasetMeta(dsIdx).data.forEach((bar, i) => {
+            const v = ds.data[i];
+            if (v == null) return;
+            g.save();
+            g.font = '600 11px sans-serif';
+            g.fillStyle = dsIdx === 0 ? '#1d4ed8' : '#64748b';
+            g.textAlign = 'center';
+            g.fillText(fmt(v), bar.x, v < 0 ? bar.y + 16 : bar.y - 6);
+            g.restore();
+          });
+        });
+      },
+    };
     registry[canvasId] = new Chart(c, {
+      type: 'bar',
       data: {
         labels,
         datasets: [
-          { type: 'bar', label: 'Inversión Proyectada', data: actual, backgroundColor: '#0f172a' },
-          { type: 'bar', label: 'Inversión Ppto', data: ppto, backgroundColor: '#38bdf8' },
-          { type: 'line', label: 'Inversión Proyectada Acum.', data: actualAcum, borderColor: '#1e3a8a',
-            tension: .2, pointRadius: 3, borderWidth: 2 },
-          { type: 'line', label: 'Inversión Ppto Acum.', data: pptoAcum, borderColor: '#7dd3fc',
-            tension: .2, pointRadius: 3, borderWidth: 2 },
+          { label: 'Actual', data: actual, backgroundColor: '#2563eb', borderRadius: 3, maxBarThickness: 46 },
+          { label: 'Presupuesto', data: ppto, backgroundColor: '#dbe3ee', borderRadius: 3, maxBarThickness: 46 },
         ],
       },
-      options: baseOpts(),
+      options: Object.assign(baseOpts(), {
+        plugins: Object.assign({}, baseOpts().plugins, { legend: { display: false } }),
+      }),
+      plugins: [dataLabelsPlugin],
     });
+  }
+
+  // Línea "Inversión acumulada" Actual (sólida) vs Ppto (punteada), con el área entre
+  // ambas rellena (Chart.js fill nativo, sin plugin) — "sobre-inversión vs. PPTO".
+  function lineInversionAcumulada(canvasId, labels, actualAcum, pptoAcum) {
+    destroy(canvasId);
+    const c = ctx(canvasId); if (!c) return;
+    const datasets = [
+      { label: 'PPTO', data: pptoAcum, borderColor: '#94a3b8', borderDash: [5, 4],
+        fill: false, tension: .15, pointRadius: 3, borderWidth: 2 },
+      { label: 'Actual', data: actualAcum, borderColor: '#2563eb', backgroundColor: 'rgba(245,158,11,.18)',
+        fill: 0, tension: .15, pointRadius: 4, pointBackgroundColor: '#fff', pointBorderColor: '#2563eb',
+        pointBorderWidth: 2, borderWidth: 2.8 },
+    ];
+    const opts = baseOpts();
+    opts.animation = false;
+    opts.plugins.legend.display = false;
+    // La brecha (actual vs. ppto) se muestra solo al pasar el mouse, dentro del tooltip
+    // nativo de Chart.js — nada queda dibujado fijo sobre el gráfico tapando la línea.
+    opts.plugins.tooltip.callbacks.label = (it) => `${it.dataset.label}: ${fmt(it.parsed.y)} UF`;
+    opts.plugins.tooltip.callbacks.afterBody = (items) => {
+      if (!items.length) return [];
+      const idx = items[0].dataIndex;
+      const gap = Math.abs(actualAcum[idx]) - Math.abs(pptoAcum[idx]);
+      if (gap === 0) return [];
+      return [`${fmt(Math.abs(gap))} UF ${gap > 0 ? 'sobre' : 'bajo'} el PPTO`];
+    };
+    registry[canvasId] = new Chart(c, { type: 'line', data: { labels, datasets }, options: opts });
+    return registry[canvasId];
   }
 
   // Redondea hacia arriba al múltiplo "lindo" (1/2/5/10 × 10^n) más cercano — techo de eje Y.
@@ -116,25 +167,39 @@
     return nice * magnitude;
   }
 
-  // Cada cuántas etiquetas de mes mostrar una, para no amontonar texto con horizontes largos.
-  function labelStep(n) {
-    return n > 15 ? Math.ceil(n / 12) : 1;
+  // Eje X por año: 1 etiqueta centrada por año + separador vertical entre años (en vez de
+  // una etiqueta por mes/trimestre, ilegible con horizontes largos). `years[i]` = "2026" etc.,
+  // paralelo a los datos; `xOf(i)` ya calculado por el chart que llama a este helper.
+  function yearAxisSvg(years, xOf, n, plotTop, plotBottom, labelY) {
+    let out = '';
+    let start = 0;
+    for (let i = 1; i <= n; i++) {
+      if (i === n || years[i] !== years[start]) {
+        if (start > 0) {
+          const sepX = ((xOf(start - 1) + xOf(start)) / 2).toFixed(1);
+          out += `<line x1="${sepX}" y1="${plotTop}" x2="${sepX}" y2="${plotBottom}" stroke="#e2e8f0" stroke-width="1"></line>`;
+        }
+        const midX = ((xOf(start) + xOf(i - 1)) / 2).toFixed(1);
+        out += `<text x="${midX}" y="${labelY}" text-anchor="middle" font-size="12" fill="#475569" font-weight="700">${PF.esc(years[start])}</text>`;
+        start = i;
+      }
+    }
+    return out;
   }
 
-  function fmtK(v) {
-    return Math.round(v / 1000) + 'k';
-  }
-
-  // Gráfico SVG "Caja acumulada: proyectada vs. real" (banda de riesgo + umbral + callout del mínimo).
-  // labels/proj alineados por índice; real puede tener null en los meses sin dato (se corta la línea).
-  function svgCajaAcumulada(labels, proj, real, umbral) {
+  // Gráfico SVG "Caja acumulada: proyectada vs. real" — banda roja = zona negativa (bajo cero),
+  // callout del mínimo, eje X por año. labels/proj/years alineados por índice; real puede tener
+  // null en los meses sin dato (se corta la línea).
+  function svgCajaAcumulada(labels, proj, real, years) {
     const n = proj.length;
     if (!n) return '';
-    const W = 780, H = 300, padL = 62, padR = 18, padT = 20, padB = 34;
+    const W = 1340, H = 320, padL = 68, padR = 18, padT = 20, padB = 30;
     const plotW = W - padL - padR, plotH = H - padT - padB;
-    const top = niceCeil(Math.max(...proj, umbral || 0, 1) * 1.05);
+    const top = niceCeil(Math.max(...proj, 1) * 1.05);
+    const minRaw = Math.min(...proj, 0);
+    const bottom = minRaw < 0 ? -niceCeil(-minRaw * 1.05) : 0;
     const x = (i) => padL + (i + 0.5) * (plotW / n);
-    const y = (v) => padT + plotH * (1 - v / top);
+    const y = (v) => padT + plotH * (top - v) / (top - bottom);
 
     const pts = proj.map((v, i) => [x(i), y(v)]);
     const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
@@ -149,28 +214,30 @@
 
     const minVal = Math.min(...proj);
     const minIdx = proj.indexOf(minVal);
-    const umbralY = y(umbral || 0);
 
-    const step = labelStep(n);
-    const monthLabelY = H - padB + 22;
-    let monthLabels = '';
-    labels.forEach((lab, i) => {
-      if (i % step !== 0) return;
-      const isMin = i === minIdx;
-      monthLabels += `<text x="${x(i).toFixed(1)}" y="${monthLabelY}" text-anchor="middle" font-size="10.5" fill="${isMin ? '#b91c1c' : '#64748b'}" font-weight="${isMin ? 700 : 600}">${PF.esc(lab)}</text>`;
-    });
+    const yearLabels = yearAxisSvg(years, x, n, padT, padT + plotH, H - padB + 20);
 
+    const gridVals = bottom < 0 ? [bottom, bottom / 2, 0, top / 2, top] : [0, top / 4, top / 2, top * 3 / 4, top];
     let gridlines = '', gridLabels = '';
-    for (let g = 0; g <= 4; g++) {
-      const v = top * g / 4, gy = y(v);
-      gridlines += `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${padL + plotW}" y2="${gy.toFixed(1)}" stroke="#e2e8f0" stroke-width="1"></line>`;
+    gridVals.forEach((v) => {
+      const gy = y(v);
+      const isZero = Math.abs(v) < 1e-6;
+      gridlines += `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${padL + plotW}" y2="${gy.toFixed(1)}" stroke="${isZero ? '#94a3b8' : '#e2e8f0'}" stroke-width="${isZero ? 1.5 : 1}"></line>`;
       gridLabels += `<text x="${padL - 10}" y="${(gy + 3.5).toFixed(1)}" text-anchor="end" font-size="10.5" fill="#94a3b8" font-weight="600">${PF.fmtNum(v)}</text>`;
-    }
+    });
 
     const dots = pts.map((p) => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3" fill="#fff" stroke="#2563eb" stroke-width="2"></circle>`).join('');
 
-    const calloutL = Math.max(4, Math.min(x(minIdx) - 80, padL + plotW - 160));
-    const calloutT = Math.max(4, y(minVal) - 52);
+    // Ningún callout queda dibujado por default — el detalle (valor + mes) solo aparece al
+    // pasar el mouse, con un hit-circle invisible más grande (r=9) por punto, con data-tip-*
+    // que app.js usa para armar el tooltip flotante. El mínimo, además, sigue con un punto
+    // rojo siempre visible para no perder esa referencia de un vistazo.
+    const hoverPts = pts.map((p, i) => {
+      const isMin = i === minIdx && minVal < 0;
+      const title = (isMin ? 'mínimo ' : '') + PF.fmtNum(proj[i]) + ' UF';
+      return `<circle class="hover-pt" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="9" fill="transparent"
+        data-tip-title="${PF.esc(title)}" data-tip-sub="${PF.esc(labels[i])}" data-tip-tone="${isMin ? 'dark' : 'light'}"></circle>`;
+    }).join('');
 
     return `<div class="chart-svg-wrap">
       <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block; width:100%">
@@ -178,60 +245,57 @@
           <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.22" />
           <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.02" />
         </linearGradient></defs>
-        <rect x="${padL}" y="${umbralY.toFixed(1)}" width="${plotW}" height="${(y(0) - umbralY).toFixed(1)}" fill="#fee2e2" opacity="0.55"></rect>
+        ${bottom < 0 ? `<rect x="${padL}" y="${y(0).toFixed(1)}" width="${plotW}" height="${(y(bottom) - y(0)).toFixed(1)}" fill="#fee2e2" opacity="0.55"></rect>` : ''}
         ${gridlines}${gridLabels}
-        <line x1="${padL}" y1="${umbralY.toFixed(1)}" x2="${padL + plotW}" y2="${umbralY.toFixed(1)}" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="5 4"></line>
-        <text x="${padL + plotW}" y="${(umbralY - 6).toFixed(1)}" text-anchor="end" font-size="10.5" fill="#b91c1c" font-weight="700">umbral de alerta</text>
         <path d="${area}" fill="url(#cajaFill)"></path>
         <path d="${line}" fill="none" stroke="#2563eb" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"></path>
         ${realLine ? `<path d="${realLine.trim()}" fill="none" stroke="#0f172a" stroke-width="2.2" stroke-dasharray="6 4" stroke-linecap="round"></path>` : ''}
         ${dots}
-        <circle cx="${x(minIdx).toFixed(1)}" cy="${y(minVal).toFixed(1)}" r="5.5" fill="#dc2626" stroke="#fff" stroke-width="2"></circle>
-        ${monthLabels}
+        ${minVal < 0 ? `<circle cx="${x(minIdx).toFixed(1)}" cy="${y(minVal).toFixed(1)}" r="5.5" fill="#dc2626" stroke="#fff" stroke-width="2"></circle>` : ''}
+        ${yearLabels}
+        ${hoverPts}
       </svg>
-      <div style="position:absolute; left:${calloutL.toFixed(1)}px; top:${calloutT.toFixed(1)}px; background:#0f172a; border-radius:8px; padding:7px 11px; box-shadow:var(--pf-shadow-callout)">
-        <div style="font-size:11px; font-weight:700; color:#fff; white-space:nowrap">mínimo ${PF.fmtNum(minVal)} UF</div>
-        <div style="font-size:10.5px; color:#94a3b8; white-space:nowrap; margin-top:1px">${PF.esc(labels[minIdx])}</div>
-      </div>
     </div>`;
   }
 
-  // Gráfico SVG "Flujo neto mensual" — barras divergentes (aportes bajo el eje, devoluciones sobre).
-  function svgFlujoNeto(labels, net) {
+  // Gráfico SVG "Flujo neto por trimestre" — barras divergentes (aportes bajo el eje,
+  // devoluciones sobre), eje X por año, y solo 2 callouts (mínimo y máximo) en vez de una
+  // etiqueta por barra.
+  function svgFlujoNeto(labels, net, years) {
     const n = net.length;
     if (!n) return '';
-    const W = 780, H = 220, padL = 62, padR = 18, padT = 26, padB = 26;
+    const W = 1340, H = 240, padL = 68, padR = 18, padT = 30, padB = 26;
     const plotW = W - padL - padR, plotH = H - padT - padB;
     const maxPos = Math.max(0, ...net) || 1000;
     const maxNeg = Math.max(0, ...net.map((v) => -v)) || 1000;
     const zeroY = padT + plotH * maxPos / (maxPos + maxNeg);
-    const bw = (plotW / n) * 0.5;
+    const bw = (plotW / n) * 0.55;
+    const x = (i) => padL + (i + 0.5) * (plotW / n);
 
-    let bars = '', valueLabels = '';
+    let bars = '', hoverBars = '';
     net.forEach((v, i) => {
-      const cx = padL + (i + 0.5) * (plotW / n);
+      const cx = x(i);
       const h = Math.abs(v) / (maxPos + maxNeg) * plotH;
       const pos = v >= 0;
       const barY = pos ? zeroY - h : zeroY;
       const fill = pos ? '#16a34a' : '#dc2626';
-      bars += `<rect x="${(cx - bw / 2).toFixed(1)}" y="${barY.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="3" fill="${fill}"></rect>`;
-      const labelY = pos ? barY - 6 : barY + h + 12;
-      valueLabels += `<text x="${cx.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle" font-size="10" fill="${fill}" font-weight="700">${fmtK(v)}</text>`;
+      bars += `<rect x="${(cx - bw / 2).toFixed(1)}" y="${barY.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(h, 1).toFixed(1)}" rx="3" fill="${fill}"></rect>`;
+      // Hit-rect invisible más ancho que la barra (fácil de hoverear) con el detalle del
+      // valor de esta barra — ningún callout se dibuja por default, solo al pasar el mouse.
+      hoverBars += `<rect class="hover-pt" x="${(cx - (plotW / n) / 2).toFixed(1)}" y="${padT}" width="${(plotW / n).toFixed(1)}" height="${plotH.toFixed(1)}" fill="transparent"
+        data-tip-title="${v >= 0 ? '+' : ''}${PF.fmtNum(v)} UF" data-tip-sub="${PF.esc(labels[i])}" data-tip-tone="${v < 0 ? 'dark' : 'light'}"></rect>`;
     });
 
-    const step = labelStep(n);
-    const monthLabelY = H - padB + 20;
-    let monthLabels = '';
-    labels.forEach((lab, i) => {
-      if (i % step !== 0) return;
-      monthLabels += `<text x="${(padL + (i + 0.5) * (plotW / n)).toFixed(1)}" y="${monthLabelY}" text-anchor="middle" font-size="10.5" fill="#64748b" font-weight="600">${PF.esc(lab)}</text>`;
-    });
+    const yearLabels = yearAxisSvg(years, x, n, padT, padT + plotH, H - padB + 20);
 
-    return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block; max-width:100%">
-      ${bars}
-      <line x1="${padL}" y1="${zeroY.toFixed(1)}" x2="${padL + plotW}" y2="${zeroY.toFixed(1)}" stroke="#cbd5e1" stroke-width="1.5"></line>
-      ${valueLabels}${monthLabels}
-    </svg>`;
+    return `<div class="chart-svg-wrap">
+      <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block; width:100%">
+        ${bars}
+        <line x1="${padL}" y1="${zeroY.toFixed(1)}" x2="${padL + plotW}" y2="${zeroY.toFixed(1)}" stroke="#cbd5e1" stroke-width="1.5"></line>
+        ${yearLabels}
+        ${hoverBars}
+      </svg>
+    </div>`;
   }
 
   // Sparkline SVG 58×22 para una fila de la tabla de Flujo de Caja.
@@ -265,7 +329,7 @@
   }
 
   window.PFCharts = {
-    destroy, stackedByCategoria, doughnutCategorias, comboInversionVsPpto,
+    destroy, stackedByCategoria, doughnutCategorias, barInversionPeriodo, lineInversionAcumulada,
     lineCajaAcumulada, svgCajaAcumulada, svgFlujoNeto, sparkline, COLORS,
   };
 })();

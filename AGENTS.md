@@ -117,12 +117,40 @@ otras 8 vistas **no** se rediseñaron — solo heredan la paleta/paneles nuevos 
   `--pf-success-*`, `--pf-warning-*`, `--pf-danger-*`), radios (`--pf-radius-*`) y sombras
   (`--pf-shadow-*`). `--pf-primary`/`--pf-ingreso`/`--pf-egreso`/`--pf-border`/`--pf-text-muted`
   (usadas en toda la app, incluidas las 8 vistas no rediseñadas) apuntan a esos tokens.
-- **Consolidado** (`renderDashboard`): banner de veredicto (sano/no alcanza, calculado con
-  `umbralAlertaMonths`), 4 KPIs (`kpi2Card`), los dos gráficos como SVG a mano
-  (`PFCharts.svgCajaAcumulada`, `PFCharts.svgFlujoNeto` en `charts.js` — no Chart.js, para lograr la
-  banda de riesgo/callout/barras divergentes pixel-perfect) y un rail de alertas de 4 reglas
-  (`alertItemHtml`): tramo bajo umbral, proyecto que concentra >30% de los aportes en ese tramo,
-  caja real desactualizada, y la última importación (`state.importLog[0]`).
+- **Consolidado** (`renderDashboard`): banner de veredicto (sano/caja negativa) y 4 KPIs
+  (`kpi2Card`, con un 5º parámetro `signed` opcional que antepone "+" a valores positivos — usado
+  solo en "Neto del horizonte"), los dos gráficos como SVG a mano (`PFCharts.svgCajaAcumulada`,
+  `PFCharts.svgFlujoNeto` en `charts.js` — no Chart.js, para lograr la banda de riesgo/callout/barras
+  divergentes pixel-perfect) y un rail de alertas de 4 reglas (`alertItemHtml`): caja que cruza a
+  negativo, proyecto que concentra >30% de los aportes en ese tramo, caja real desactualizada, y la
+  última importación (`state.importLog[0]`).
+  - **Sin umbral configurable**: `renderDashboard` llama `umbralAlertaMonths(t, 0)` (referencia fija
+    "caja en cero"), no `state.config.umbralAlerta` — a diferencia de Flujo de Caja mensual
+    (`renderFlujoMensual`), que **sí** sigue usando el umbral configurable de Configuración para su
+    semáforo de celda (`sem-bajo/sem-riesgo/sem-ok`). Es la única vista donde se simplificó así.
+  - **Escala Y bipolar** en `svgCajaAcumulada`: `bottom` se calcula del mínimo real de la serie (no
+    siempre 0), para que la línea proyectada se pueda dibujar correctamente cuando cruza a negativo,
+    con la banda roja cubriendo solo la zona bajo cero (antes el eje asumía 0 como piso fijo, lo que
+    rompía la banda/línea si el dato bajaba de 0).
+  - **Eje X por año** (`yearAxisSvg`, helper compartido): 1 etiqueta centrada por año + separador
+    vertical entre años, en vez de una etiqueta por mes/trimestre — usa un array `years[i]` paralelo
+    a los datos (no parsea el texto de la label).
+  - **`svgFlujoNeto` recibe datos trimestrales**, no mensuales: `renderDashboard` agrega con
+    `periodBuckets(t.months, 'trimestral')` antes de llamar al chart (mismo patrón que Resumen
+    Directorio). Ya no dibuja una etiqueta de valor por barra ("0k0k0k..." con 60 barras).
+  - **Sin callouts dibujados por default — solo tooltip on-hover**: ambos SVG dibujan, sobre cada
+    punto/barra, un elemento invisible `class="hover-pt"` (`<circle r="9">` o `<rect>` del ancho de
+    la barra) con `data-tip-title`/`data-tip-sub`/`data-tip-tone` (`dark` si el valor es negativo,
+    `light` si es positivo). `wireChartHoverTips(el)` en `app.js` (llamado al final de
+    `renderDashboard`) crea **un solo** div `.chart-hover-tip.chart-annotation` por gráfico y lo
+    reposiciona/rellena en cada `mouseenter` de un `.hover-pt`, usando `getBoundingClientRect()` del
+    punto hovereado (no las unidades del viewBox) — por eso cae bien sin importar a qué ancho haya
+    escalado el SVG. El punto mínimo de `svgCajaAcumulada` sigue con un puntito rojo siempre visible
+    (referencia rápida sin hover); todo lo demás (valor exacto, mes/trimestre) es solo al pasar el
+    mouse, para no tapar el gráfico con cajas fijas.
+  - **`.chart-svg-wrap` ya no tiene `max-width:780px`** (bug real: dejaba los 2 gráficos a poco más
+    de la mitad del ancho del panel en pantallas anchas, un resabio de cuando `W` del SVG era 780).
+    Ahora ambos SVG usan `W=1340` y ocupan el 100% del panel.
 - **Flujo de Caja** (`renderFlujoMensual`): tabla con categorías colapsables (chevron, clic o
   Enter/Espacio; estado en `localStorage['pf.flujo.openCats']`, la primera categoría con proyectos
   abierta por defecto), semáforo por celda en "Caja proyectada acumulada" (clases `.sem-bajo/
@@ -158,11 +186,11 @@ verde/rojo si hay presupuesto cargado) usan un helper local `dirKpiCard` (no el 
 Consolidado, porque el valor de esta cuarta tarjeta puede ser texto, no solo número). La tabla de
 categorías tiene **columnas condicionales**: 1 columna (Actual) por período sin presupuesto cargado, 2
 (Actual, Δ) con presupuesto — nunca 3 columnas fijas de Ppto/Actual/Var como antes; los ceros se
-muestran como "—", nunca "0 UF". El gráfico (`PFCharts.lineCajaAcumulada` en `charts.js`) es una sola
-línea de Chart.js con el punto mínimo resaltado y una línea de presupuesto punteada que se omite del
-todo si viene toda en cero; las anotaciones de texto (mínimo y mayor salto) son `<div>` absolutos
-posicionados leyendo los píxeles reales de `chart.getDatasetMeta(...)` después de renderizar, no
-porcentajes fijos.
+muestran como "—", nunca "0 UF". El gráfico (`PFCharts.lineCajaAcumulada` en `charts.js`, llamado con
+`acumPpto = null`) muestra **solo la línea de Actual** (con el punto mínimo resaltado) — no compara
+contra presupuesto, a diferencia de la tabla; las anotaciones de texto (mínimo y mayor salto) son
+`<div>` absolutos posicionados leyendo los píxeles reales de `chart.getDatasetMeta(...)` después de
+renderizar, no porcentajes fijos.
 
 **Flujo de Obras por año de inicio** (misma vista, sección aparte): tabla igual de colapsable que
 Flujo de Caja pero agrupada por `proyecto.grupoObra` en vez de categoría, y **excluyendo los
@@ -177,9 +205,42 @@ iniciar" del mismo año (esa distinción no es inferible solo del flujo de caja)
 proyecto es `draggable="true"` y cada fila de grupo acepta el `drop`, para que el usuario corrija a
 mano cuando la heurística se equivoque; la corrección se guarda en `grupoObra` y nunca se
 recalcula sola (`ensureGruposObra` solo clasifica proyectos que **no** tienen `grupoObra` todavía).
-El gráfico "Flujo de Caja: Actual vs Presupuesto" (`PFCharts.comboInversionVsPpto`, Chart.js con
-datasets `bar`+`line` mezclados, mismo patrón que el chart de detalle de proyecto) usa los totales de
-esta misma tabla (actual/ppto por período y acumulado).
+**Sección "Inversión en obras"** (2 gráficos + 1 tabla, siempre **anual y acotada a 2026-2028**
+— constantes `OBRA_CHART_ANIO_DESDE`/`_HASTA` en `app.js` — sin importar la granularidad elegida
+arriba para la tabla por categoría; `obraAnualBuckets = periodBuckets(months, 'anual')` filtrado a
+ese rango de años):
+- **"Inversión en obras del período"** (`PFCharts.barInversionPeriodo`): barras agrupadas Actual vs
+  Presupuesto por año, con el valor de cada barra dibujado encima/debajo vía un plugin de Chart.js
+  inline (sin librería de datalabels externa).
+- **"Inversión acumulada"** (`PFCharts.lineInversionAcumulada`): línea Actual sólida vs Ppto punteada,
+  con el área entre ambas rellena (`fill: 0` de Chart.js apuntando al dataset de Ppto, nativo, sin
+  plugin). La brecha ("X UF sobre/bajo el PPTO") **no** se dibuja fija sobre el gráfico — se calcula
+  por punto en `opts.plugins.tooltip.callbacks.afterBody` y aparece solo en el tooltip nativo de
+  Chart.js al pasar el mouse (una caja fija tapaba la línea y quedaba "pegada" siempre en el mismo
+  lugar, independiente de qué tan ancho se renderizara el chart).
+  **Estos 2 gráficos usan solo la línea "obras nuevas 2026-2028"** (`obraNuevaProyectos` — ver abajo),
+  acumulada pura desde cero, **sin** `cajaInicial` — a propósito, para que reconcilien exactamente
+  con la fila "Flujo obras 2026 a 2028" de la tabla de abajo.
+- **Tabla "Actual, presupuesto y desviación por año"**: `Concepto` + 3 columnas (Actual/Ppto/Δ) por
+  año, 4 líneas + fila total + fila acumulada (clase `.total-row`, reutilizada), botón "Exportar
+  Excel" propio (`#resumen-obra-excel`, separado del de la tabla por categoría). Las 4 líneas:
+  - **Flujo obras 2026 a 2028**: proyectos de Flujo de Obras (`obraProyectos`, ya excluye
+    Financiamiento) cuyo `grupoObra` cae en ese rango de años.
+  - **Flujo proyectos activos a diciembre 2025**: el resto de `obraProyectos` (`grupoObra` "Sin
+    clasificar" o fuera del rango) — proyectos sin un aporte nuevo detectado en 2026-2028.
+  - **Flujo Financiero Corp** / **Bono F**: split de la categoría Financiamiento por el campo `tipo`
+    del proyecto — `tipo === 'Bono F'` (bono F y sus intereses) va a la fila Bono F, todo lo demás
+    (otros bonos, factoring, CxP relacionadas, FOGAES, dividendos, impuestos, etc.) va a Financiero
+    Corp. Este split viene directo del archivo maestro real (columna "tipo" de la hoja
+    "FINANCIAMIENTO, DIVIDENDOS, IMP"), no es inventado.
+  - **Flujo de caja** / **Flujo de caja acumulado**: suma de las 4 líneas; a diferencia de los 2
+    gráficos de arriba, el acumulado de **esta tabla sí** parte de `state.config.cajaInicial` (mismo
+    campo que usan Consolidado y Flujo de Caja mensual) — es la única excepción en todo Resumen
+    Directorio, que por lo demás deliberadamente no usa caja inicial para que Actual y Ppto sean
+    comparables entre sí sin depender de un saldo externo.
+  Los colores de signo (Actual) y semáforo (Δ, `success-100`/`danger-100`) se aplican con `style`
+  inline en las celdas, no con las clases `.pos`/`.neg`/`.sem-*`, porque la fila total tiene su
+  propio fondo por CSS (`.total-row`) que gana por especificidad sobre esas clases.
 
 ## Pendiente
 

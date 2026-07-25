@@ -10,12 +10,16 @@
   const PF = {
     fmtNum(v) {
       if (v === null || v === undefined || isNaN(v)) return '—';
-      return Math.round(v).toLocaleString('es-CL');
+      const r = Math.round(v);
+      const s = Math.abs(r).toLocaleString('es-CL');
+      return r < 0 ? '(' + s + ')' : s;
     },
     fmtMoney(v, moneda) {
       if (v === null || v === undefined || isNaN(v)) return '—';
-      const n = PF.fmtNum(v);
-      return (moneda || state.config.moneda) === 'CLP' ? '$' + n : n + ' UF';
+      const r = Math.round(v);
+      const body = Math.abs(r).toLocaleString('es-CL');
+      const withUnit = (moneda || state.config.moneda) === 'CLP' ? '$' + body : body + ' UF';
+      return r < 0 ? '(' + withUnit + ')' : withUnit;
     },
     monthLabel(key) {
       if (!key) return '';
@@ -225,11 +229,13 @@
   }
 
   // ------------------------------------------------------------- Vista: Dashboard
-  function kpi2Card(label, value, sub, accent, valueColor) {
+  function kpi2Card(label, value, sub, accent, valueColor, signed) {
+    const num = PF.fmtNum(value);
+    const shown = signed && value > 0 ? '+' + num : num;
     return `<div class="kpi2-card">
       <div class="kpi2-accent" style="background:${accent}"></div>
       <div class="kpi2-label">${PF.esc(label)}</div>
-      <div class="kpi2-value" style="color:${valueColor}">${PF.fmtNum(value)} <span class="unit">UF</span></div>
+      <div class="kpi2-value" style="color:${valueColor}">${shown} <span class="unit">UF</span></div>
       <div class="kpi2-sub">${PF.esc(sub)}</div>
     </div>`;
   }
@@ -246,59 +252,95 @@
     </div>`;
   }
 
+  // Tooltip on-hover para los gráficos SVG a mano (Consolidado): cada `.hover-pt` (punto o
+  // barra invisible) trae data-tip-title/-sub/-tone; en mouseenter se posiciona un único div
+  // por gráfico usando las coordenadas reales del punto (getBoundingClientRect), no las
+  // unidades internas del viewBox — así siempre cae en el lugar correcto sin importar a qué
+  // ancho haya escalado el SVG.
+  function wireChartHoverTips(root) {
+    root.querySelectorAll('.chart-svg-wrap').forEach((wrap) => {
+      const tip = document.createElement('div');
+      tip.className = 'chart-hover-tip chart-annotation';
+      wrap.appendChild(tip);
+      wrap.querySelectorAll('.hover-pt').forEach((pt) => {
+        pt.addEventListener('mouseenter', () => {
+          const tone = pt.dataset.tipTone || 'dark';
+          tip.className = 'chart-hover-tip chart-annotation ' + tone;
+          tip.innerHTML = `<div style="font-size:11px; font-weight:700; color:${tone === 'dark' ? '#fff' : '#0f172a'}; white-space:nowrap">${PF.esc(pt.dataset.tipTitle)}</div>
+            <div style="font-size:10.5px; color:${tone === 'dark' ? '#94a3b8' : '#64748b'}; white-space:nowrap; margin-top:1px">${PF.esc(pt.dataset.tipSub)}</div>`;
+          tip.style.display = 'block';
+          const wrapRect = wrap.getBoundingClientRect();
+          const ptRect = pt.getBoundingClientRect();
+          const cx = ptRect.left + ptRect.width / 2 - wrapRect.left;
+          const cy = ptRect.top - wrapRect.top;
+          const tipW = tip.offsetWidth || 140, tipH = tip.offsetHeight || 44;
+          const left = Math.max(4, Math.min(cx - tipW / 2, wrapRect.width - tipW - 4));
+          const top = Math.max(4, cy - tipH - 12);
+          tip.style.left = left + 'px';
+          tip.style.top = top + 'px';
+        });
+        pt.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+      });
+    });
+  }
+
   function renderDashboard() {
     const el = document.getElementById('dashboard');
     if (!state.proyectos.length) { el.innerHTML = emptyState('No hay proyectos todavía', 'Importa un Excel para comenzar.', 'importar'); wireEmpty(el); return; }
 
     const t = buildTimeline();
     const cur = PF.currentMonth();
-    const umbral = Number(state.config.umbralAlerta) || 0;
-    const tramo = umbralAlertaMonths(t, umbral);
+    // La referencia de este panel es "caja en cero" (no un umbral configurable): tramo = meses
+    // consecutivos con proyección negativa que contienen el mínimo.
+    const tramo = umbralAlertaMonths(t, 0);
 
-    // ---- KPI 1: Caja actual (real si hay dato del mes actual, si no la proyección más cercana).
+    // ---- KPI 1: Caja actual (real si hay dato del mes actual; si no hay ninguna caja real
+    // cargada todavía, se deja claro que el número es solo la Caja inicial configurada).
     const cajaActualMonth = (t.proj[cur] != null) ? cur
       : (t.months.length ? (cur < t.months[0] ? t.months[0] : t.months[t.months.length - 1]) : null);
     const cajaActual = state.cajaReal[cur] ? state.cajaReal[cur].monto : (cajaActualMonth ? t.proj[cajaActualMonth] : null);
+    const hasCajaReal = Object.keys(state.cajaReal || {}).length > 0;
+    const kpi1Sub = state.cajaReal[cur]
+      ? 'Real (banco), ' + PF.monthLabel(cur)
+      : (hasCajaReal ? 'Proyectada, ' + PF.monthLabel(cajaActualMonth) : 'Caja inicial · sin caja real cargada');
 
-    // ---- KPI 3: aportes de los próximos 3 meses desde hoy.
+    // ---- KPI 3: egresos (aportes) de los próximos 12 meses desde hoy.
     const curIdx = t.months.findIndex((m) => m >= cur);
-    const proxStart = curIdx >= 0 ? curIdx : Math.max(0, t.months.length - 3);
-    const proxMonths = t.months.slice(proxStart, proxStart + 3);
-    const prox3 = proxMonths.reduce((s, m) => s + Math.min(0, t.net[m] || 0), 0);
-    const proxLabel = proxMonths.length
-      ? 'Aportes ' + PF.monthLabel(proxMonths[0]) + (proxMonths.length > 1 ? '–' + PF.monthLabel(proxMonths[proxMonths.length - 1]) : '')
-      : 'Aportes próximos';
+    const proxStart = curIdx >= 0 ? curIdx : Math.max(0, t.months.length - 12);
+    const prox12Months = t.months.slice(proxStart, proxStart + 12);
+    const prox12 = prox12Months.reduce((s, m) => s + Math.min(0, t.net[m] || 0), 0);
+    const prox12Year = prox12Months.length ? prox12Months[0].slice(0, 4) : '';
 
-    // ---- KPI 4: neto del año calendario en curso.
-    const curYear = String(new Date().getFullYear());
-    const yearMonths = t.months.filter((m) => m.slice(0, 4) === curYear);
-    const aportesAnio = yearMonths.reduce((s, m) => s + Math.min(0, t.net[m] || 0), 0);
-    const devolAnio = yearMonths.reduce((s, m) => s + Math.max(0, t.net[m] || 0), 0);
+    // ---- KPI 4: neto de todo el horizonte proyectado (no solo el año calendario en curso).
+    const netoHorizonte = t.months.reduce((s, m) => s + (t.net[m] || 0), 0);
+    const cierreProyectado = t.months.length ? t.proj[t.months[t.months.length - 1]] : 0;
 
     // ---- Banner de veredicto.
     let verdictHtml;
     if (tramo) {
-      const rango = tramo.count > 1 ? `entre <b>${PF.monthLabel(tramo.start)}</b> y <b>${PF.monthLabel(tramo.end)}</b>` : `en <b>${PF.monthLabel(tramo.start)}</b>`;
       verdictHtml = `<div class="verdict-banner">
         <i class="bi bi-exclamation-triangle-fill verdict-icon"></i>
-        <div class="verdict-text">La caja no alcanza: cae bajo el umbral ${rango}, con mínimo de <b>${PF.fmtNum(t.minAcc)} UF</b> en ${PF.monthLabel(t.minMonth)}.</div>
-        <div class="verdict-gap">Faltan <b>${PF.fmtNum(umbral - t.minAcc)} UF</b> para sostener el umbral</div>
+        <div class="verdict-text">La caja queda negativa ${tramo.count} mes${tramo.count > 1 ? 'es' : ''} a partir de <b>${PF.monthLabel(tramo.start)}</b>, con un mínimo de <b>${PF.fmtNum(t.minAcc)} UF</b> en ${PF.monthLabel(t.minMonth)}.</div>
+        <div class="verdict-gap">Faltan <b>${PF.fmtNum(Math.abs(t.minAcc))} UF</b> para no cruzar el cero</div>
       </div>`;
     } else {
       verdictHtml = `<div class="verdict-banner ok">
         <i class="bi bi-check-circle-fill verdict-icon"></i>
-        <div class="verdict-text">La caja se sostiene sobre el umbral en los ${t.months.length} meses proyectados (mínimo ${PF.fmtNum(t.minAcc)} UF en ${PF.monthLabel(t.minMonth)}).</div>
+        <div class="verdict-text">La caja se mantiene positiva en los ${t.months.length} meses proyectados (mínimo ${PF.fmtNum(t.minAcc)} UF en ${PF.monthLabel(t.minMonth)}).</div>
       </div>`;
     }
 
     // ---- Alertas.
     const alertas = [];
     if (tramo) {
+      const tramoEndIdx = t.months.indexOf(tramo.end);
+      const recoveryMonth = tramoEndIdx + 1 < t.months.length ? t.months[tramoEndIdx + 1] : null;
+      const recoveryTxt = recoveryMonth ? `se recupera recién en ${recoveryMonth.slice(0, 4)}` : 'no se recupera dentro del horizonte proyectado';
       const rangoTxt = tramo.count > 1 ? `De ${PF.monthLabel(tramo.start)} a ${PF.monthLabel(tramo.end)}` : `En ${PF.monthLabel(tramo.start)}`;
       alertas.push({
         nivel: 'Crítica', when: 'hoy', icon: 'bi-exclamation-triangle-fill', bg: 'var(--pf-danger-100)', fg: 'var(--pf-danger-700)',
-        title: `Caja bajo el umbral ${tramo.count} mes${tramo.count > 1 ? 'es' : ''} seguido${tramo.count > 1 ? 's' : ''}`,
-        detail: `${rangoTxt}; el punto más bajo es ${PF.fmtNum(t.minAcc)} UF en ${PF.monthLabel(t.minMonth)}.`,
+        title: `La caja cruza a negativo en ${tramo.start.slice(0, 4)}`,
+        detail: `El punto más bajo es ${PF.fmtNum(t.minAcc)} UF en ${PF.monthLabel(t.minMonth)}; ${recoveryTxt}.`,
         action: 'Ver flujo mensual', gotoView: 'flujo-mensual',
       });
 
@@ -353,48 +395,55 @@
     const topHitos = hitos.slice(0, 3);
 
     const labels = t.months.map(PF.monthLabel);
+    const years = t.months.map((m) => m.slice(0, 4));
     const projArr = t.months.map((m) => t.proj[m]);
     const realArr = t.months.map((m) => (t.real[m] != null ? t.real[m] : null));
-    const netArr = t.months.map((m) => t.net[m]);
+
+    // Flujo neto: se agrega a trimestre (60 barras mensuales no se leen); reutiliza
+    // periodBuckets, igual que Resumen Directorio.
+    const qBuckets = periodBuckets(t.months, 'trimestral');
+    const qLabels = qBuckets.map((b) => b.label);
+    const qYears = qBuckets.map((b) => b.months[0].slice(0, 4));
+    const qNet = qBuckets.map((b) => b.months.reduce((s, m) => s + (t.net[m] || 0), 0));
 
     el.innerHTML = `
       ${verdictHtml}
       <div class="d-flex gap-3 align-items-start flex-wrap flex-lg-nowrap">
         <div class="flex-grow-1" style="min-width:0; flex-basis:0">
           <div class="kpi2-grid">
-            ${kpi2Card('Caja actual', cajaActual, state.cajaReal[cur] ? 'Real (banco), ' + PF.monthLabel(cur) : 'Proyectada, ' + PF.monthLabel(cajaActualMonth), '#2563eb', 'var(--pf-slate-800)')}
-            ${kpi2Card('Mínimo proyectado', t.minAcc, 'En ' + PF.monthLabel(t.minMonth) + (tramo ? ' · bajo umbral' : ''), '#dc2626', tramo ? 'var(--pf-danger-700)' : 'var(--pf-slate-800)')}
-            ${kpi2Card(proxLabel, Math.abs(prox3), 'Egresos a programar', '#f59e0b', 'var(--pf-slate-800)')}
-            ${kpi2Card('Neto del año', aportesAnio + devolAnio, PF.fmtNum(Math.abs(aportesAnio)) + ' aportes / ' + PF.fmtNum(devolAnio) + ' devol.', '#16a34a', 'var(--pf-slate-800)')}
+            ${kpi2Card('Caja actual', cajaActual, kpi1Sub, '#2563eb', 'var(--pf-slate-800)')}
+            ${kpi2Card('Mínimo proyectado', t.minAcc, 'En ' + PF.monthLabel(t.minMonth) + (tramo ? ' · caja negativa' : ''), '#dc2626', tramo ? 'var(--pf-danger-700)' : 'var(--pf-slate-800)')}
+            ${kpi2Card('Aportes próximos 12 meses', Math.abs(prox12), 'Egresos a programar en ' + prox12Year, '#f59e0b', 'var(--pf-slate-800)')}
+            ${kpi2Card('Neto del horizonte', netoHorizonte, 'Cierre proyectado ' + PF.fmtNum(cierreProyectado) + ' UF', '#16a34a', 'var(--pf-slate-800)', true)}
           </div>
 
           <div class="panel">
             <div class="panel-header-row">
               <div>
                 <h3>Caja acumulada: proyectada vs. real</h3>
-                <p class="panel-hint">Caja inicial ${PF.fmtNum(state.config.cajaInicial)} UF · umbral de alerta ${PF.fmtNum(umbral)} UF</p>
+                <p class="panel-hint">Caja inicial ${PF.fmtNum(state.config.cajaInicial)} UF · ${t.months.length} meses, en UF</p>
               </div>
               <div class="chart-legend">
                 <span class="chart-legend-item"><span class="swatch-line" style="background:#2563eb"></span>Proyectada</span>
                 <span class="chart-legend-item"><span class="swatch-dash"></span>Real (banco)</span>
-                <span class="chart-legend-item"><span class="swatch-box" style="background:#fee2e2; border:1px solid #fecaca"></span>Bajo umbral</span>
+                <span class="chart-legend-item"><span class="swatch-box" style="background:#fee2e2; border:1px solid #fecaca"></span>Caja negativa</span>
               </div>
             </div>
-            ${PFCharts.svgCajaAcumulada(labels, projArr, realArr, umbral)}
+            ${PFCharts.svgCajaAcumulada(labels, projArr, realArr, years)}
           </div>
 
           <div class="panel mb-0">
             <div class="panel-header-row">
               <div>
-                <h3>Flujo neto mensual</h3>
-                <p class="panel-hint">Bajo la línea: aportes a proyectos. Sobre la línea: devoluciones.</p>
+                <h3>Flujo neto por trimestre</h3>
+                <p class="panel-hint">Agregado a trimestre: ${t.months.length} barras mensuales no se leen. Bajo la línea: aportes netos.</p>
               </div>
               <div class="chart-legend">
                 <span class="chart-legend-item"><span class="swatch-sq" style="background:#16a34a"></span>Devoluciones</span>
                 <span class="chart-legend-item"><span class="swatch-sq" style="background:#dc2626"></span>Aportes</span>
               </div>
             </div>
-            ${PFCharts.svgFlujoNeto(labels, netArr)}
+            ${PFCharts.svgFlujoNeto(qLabels, qNet, qYears)}
           </div>
         </div>
 
@@ -417,6 +466,7 @@
       </div>`;
 
     el.querySelectorAll('[data-goto]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); showView(a.dataset.goto); }));
+    wireChartHoverTips(el);
   }
 
   // ------------------------------------------------------- Vista: Por categoría
@@ -625,6 +675,8 @@
   })();
   const OPEN_GRUPOS_KEY = 'pf.resumen.openGrupos';
   const CAT_FINANCIAMIENTO = 'Financiamiento, Dividendo e Impuestos';
+  const OBRA_CHART_ANIO_DESDE = 2026;
+  const OBRA_CHART_ANIO_HASTA = 2028;
 
   // Infiere el "grupo de obra" (año de inicio) de un proyecto a partir del primer aporte relevante
   // de su proyección — umbral = el mayor entre 500 UF y 10% del máximo aporte absoluto del propio
@@ -835,6 +887,71 @@
     const acumActualObra = []; let accAO = 0; totalActualObra.forEach((v) => { accAO += v; acumActualObra.push(accAO); });
     const acumPptoObra = []; let accPO = 0; totalPptoObra.forEach((v) => { accPO += v; acumPptoObra.push(accPO); });
 
+    // Sección "Inversión en obras" (2 gráficos + tabla), siempre anual y acotada a
+    // 2026-2028 sin importar la granularidad de la vista — es el rango y grano que pidió
+    // el usuario para esta sección específica (viene del PPTX original del directorio).
+    const obraAnualBuckets = periodBuckets(months, 'anual').filter((b) => {
+      const anio = Number(b.months[0].slice(0, 4));
+      return anio >= OBRA_CHART_ANIO_DESDE && anio <= OBRA_CHART_ANIO_HASTA;
+    });
+    const obraAnualLabels = obraAnualBuckets.map((b) => b.label);
+
+    const obrasGruposEnRango = new Set();
+    for (let y = OBRA_CHART_ANIO_DESDE; y <= OBRA_CHART_ANIO_HASTA; y++) obrasGruposEnRango.add('Obras ' + y);
+    const obraNuevaProyectos = obraProyectos.filter((p) => obrasGruposEnRango.has(p.grupoObra || 'Sin clasificar'));
+    const obraActivosProyectos = obraProyectos.filter((p) => !obrasGruposEnRango.has(p.grupoObra || 'Sin clasificar'));
+    const finProyectos = finCat ? state.proyectos.filter((p) => p.categoriaId === finCat.id) : [];
+    const bonoFProyectos = finProyectos.filter((p) => (p.tipo || '') === 'Bono F');
+    const finCorpProyectos = finProyectos.filter((p) => (p.tipo || '') !== 'Bono F');
+
+    // Los 2 gráficos de arriba muestran solo la línea "obras nuevas 2026-2028" (no el
+    // consolidado de las 4 líneas), acumulada pura desde cero (sin Caja inicial) — así
+    // reconcilian con el desglose de la tabla de abajo.
+    const obraNuevaActualAnual = obraAnualBuckets.map((b) => sumField(obraNuevaProyectos, b.months, 'proyeccion'));
+    const obraNuevaPptoAnual = obraAnualBuckets.map((b) => sumField(obraNuevaProyectos, b.months, 'presupuesto'));
+    const obraNuevaAcumActual = []; let accONA = 0; obraNuevaActualAnual.forEach((v) => { accONA += v; obraNuevaAcumActual.push(accONA); });
+    const obraNuevaAcumPpto = []; let accONP = 0; obraNuevaPptoAnual.forEach((v) => { accONP += v; obraNuevaAcumPpto.push(accONP); });
+
+    // Tabla de abajo: 4 líneas (obras nuevas + activos + Financiero Corp + Bono F) + total +
+    // acumulado; el acumulado sí parte de Configuración > Caja inicial (igual que Consolidado
+    // y Flujo de Caja mensual), a diferencia del acumulado de los 2 gráficos de arriba.
+    const lineasTablaObra = [
+      { nombre: 'Flujo proyectos activos a diciembre 2025', proys: obraActivosProyectos },
+      { nombre: `Flujo obras ${OBRA_CHART_ANIO_DESDE} a ${OBRA_CHART_ANIO_HASTA}`, proys: obraNuevaProyectos },
+      { nombre: 'Flujo Financiero Corp', proys: finCorpProyectos },
+      { nombre: 'Bono F (aportes y amortizaciones e intereses)', proys: bonoFProyectos },
+    ].map((l) => ({
+      nombre: l.nombre,
+      actual: obraAnualBuckets.map((b) => sumField(l.proys, b.months, 'proyeccion')),
+      ppto: obraAnualBuckets.map((b) => sumField(l.proys, b.months, 'presupuesto')),
+    }));
+    const tablaObraTotalActual = obraAnualBuckets.map((_, idx) => lineasTablaObra.reduce((a, l) => a + l.actual[idx], 0));
+    const tablaObraTotalPpto = obraAnualBuckets.map((_, idx) => lineasTablaObra.reduce((a, l) => a + l.ppto[idx], 0));
+    const cajaInicialCfg = Number(state.config.cajaInicial) || 0;
+    const tablaObraAcumActual = []; let accTA = cajaInicialCfg; tablaObraTotalActual.forEach((v) => { accTA += v; tablaObraAcumActual.push(accTA); });
+    const tablaObraAcumPpto = []; let accTP = cajaInicialCfg; tablaObraTotalPpto.forEach((v) => { accTP += v; tablaObraAcumPpto.push(accTP); });
+
+    function obraTablaCeldas(actual, ppto) {
+      // Colores en línea (no clases) para que el signo de Actual y el semáforo de Δ se
+      // vean igual dentro de las filas totales, que tienen su propio fondo por CSS.
+      return obraAnualBuckets.map((_, i) => {
+        const a = actual[i], p = ppto[i], d = a - p;
+        const aTxt = a === 0 ? '—' : PF.fmtNum(a);
+        const pTxt = p === 0 ? '—' : PF.fmtNum(p);
+        const dTxt = d === 0 ? '—' : (d > 0 ? '+' : '') + PF.fmtNum(d);
+        const aColor = a < 0 ? 'var(--pf-danger-700)' : (a > 0 ? 'var(--pf-success-700)' : 'var(--pf-slate-300)');
+        const dBg = d > 0 ? 'var(--pf-success-100)' : (d < 0 ? 'var(--pf-danger-100)' : 'transparent');
+        const dColor = d < 0 ? 'var(--pf-danger-700)' : 'var(--pf-slate-800)';
+        return `<td class="num" style="color:${aColor}">${aTxt}</td><td class="num">${pTxt}</td><td class="num" style="background:${dBg}; color:${dColor}">${dTxt}</td>`;
+      }).join('');
+    }
+    const lineasTablaObraHtml = lineasTablaObra.map((l) =>
+      `<tr><td class="proj-col">${PF.esc(l.nombre)}</td>${obraTablaCeldas(l.actual, l.ppto)}</tr>`).join('');
+    const tablaObraTotalRow = `<tr class="total-row"><td class="proj-col">Flujo de caja</td>${obraTablaCeldas(tablaObraTotalActual, tablaObraTotalPpto)}</tr>`;
+    const tablaObraAcumRow = `<tr class="total-row"><td class="proj-col">Flujo de caja acumulado</td>${obraTablaCeldas(tablaObraAcumActual, tablaObraAcumPpto)}</tr>`;
+    const tablaObraHeadAnios = `<tr><th class="proj-col"></th>${obraAnualLabels.map((l) => `<th class="num" colspan="3">${PF.esc(l)}</th>`).join('')}</tr>`;
+    const tablaObraHeadCols = `<tr><th class="proj-col">Concepto</th>${obraAnualLabels.map(() => '<th class="num small text-muted">Actual</th><th class="num small text-muted">Ppto</th><th class="num small text-muted">Δ</th>').join('')}</tr>`;
+
     let obraIdx = 0;
     const obraRowsHtml = filasObra.map((f) => {
       const isOpen = Object.prototype.hasOwnProperty.call(openGrupos, f.grupo) ? openGrupos[f.grupo] : obraIdx === 0;
@@ -876,10 +993,7 @@
             <p class="panel-hint">Flujo consolidado acumulado por ${resumenGranularidad === 'anual' ? 'año' : (resumenGranularidad === 'trimestral' ? 'trimestre' : 'semestre')}, en UF.</p>
           </div>
           <div class="chart-legend">
-            <span class="chart-legend-item"><span class="swatch-line" style="background:#2563eb"></span>Caja acumulada</span>
-            ${hasPresupuesto
-              ? '<span class="chart-legend-item"><span class="swatch-dash" style="border-top-color:#94a3b8"></span>Presupuesto</span>'
-              : '<span class="chart-legend-item" style="color:#94a3b8; background:#f8fafc; border:1px solid var(--pf-border); padding:4px 10px; border-radius:999px"><i class="bi bi-slash-circle"></i> Presupuesto no cargado</span>'}
+            <span class="chart-legend-item"><span class="swatch-line" style="background:#2563eb"></span>Caja acumulada (actual)</span>
           </div>
         </div>
         <div class="chart-box" style="position:relative"><canvas id="chart-resumen-acum"></canvas></div>
@@ -923,13 +1037,53 @@
           </table>
         </div>`}
       </div>
+      <div class="row g-3">
+        <div class="col-lg-6"><div class="panel mb-0">
+          <div class="panel-header-row">
+            <div>
+              <h3>Inversión en obras del período</h3>
+              <p class="panel-hint">Egresos por año, en UF. Una sola escala.</p>
+            </div>
+            <div class="chart-legend">
+              <span class="chart-legend-item"><span class="swatch-sq" style="background:#2563eb"></span>Actual</span>
+              <span class="chart-legend-item"><span class="swatch-sq" style="background:#dbe3ee; border:1px solid #cbd5e1"></span>Presupuesto</span>
+            </div>
+          </div>
+          ${obraAnualLabels.length ? '<div class="chart-box"><canvas id="chart-obra-periodo"></canvas></div>' : '<div class="text-muted">No hay períodos en ese rango de años.</div>'}
+        </div></div>
+        <div class="col-lg-6"><div class="panel mb-0">
+          <div class="panel-header-row">
+            <div>
+              <h3>Inversión acumulada</h3>
+              <p class="panel-hint">La brecha sombreada es la sobre-inversión vs. PPTO.</p>
+            </div>
+            <div class="chart-legend">
+              <span class="chart-legend-item"><span class="swatch-line" style="background:#2563eb"></span>Actual</span>
+              <span class="chart-legend-item"><span class="swatch-dash"></span>PPTO</span>
+            </div>
+          </div>
+          ${obraAnualLabels.length ? '<div class="chart-box" style="position:relative"><canvas id="chart-obra-acum"></canvas></div>' : '<div class="text-muted">No hay períodos en ese rango de años.</div>'}
+        </div></div>
+      </div>
       <div class="panel">
-        <h6>Flujo de Caja: Actual vs Presupuesto</h6>
-        <div class="chart-box"><canvas id="chart-resumen-obra"></canvas></div>
+        <div class="panel-header-row">
+          <div>
+            <h3>Actual, presupuesto y desviación por año</h3>
+            <p class="panel-hint">Valores en UF. Δ = actual − presupuesto; verde favorece la caja.</p>
+          </div>
+          <button class="flujo-btn" id="resumen-obra-excel"><i class="bi bi-file-earmark-excel" style="color:#15803d"></i> Exportar Excel</button>
+        </div>
+        ${obraAnualLabels.length ? `
+        <div class="flujo-table-wrap table-sticky-col">
+          <table class="flujo-table">
+            <thead>${tablaObraHeadAnios}${tablaObraHeadCols}</thead>
+            <tbody>${lineasTablaObraHtml}${tablaObraTotalRow}${tablaObraAcumRow}</tbody>
+          </table>
+        </div>` : '<div class="text-muted">No hay períodos en ese rango de años.</div>'}
       </div>`;
 
     if (buckets.length) {
-      const chart = PFCharts.lineCajaAcumulada('chart-resumen-acum', buckets.map((b) => b.label), acumActual, acumPpto, minIdx);
+      const chart = PFCharts.lineCajaAcumulada('chart-resumen-acum', buckets.map((b) => b.label), acumActual, null, minIdx);
       if (chart) {
         try {
           const box = document.getElementById('chart-resumen-acum').parentElement;
@@ -958,7 +1112,12 @@
           box.insertAdjacentHTML('beforeend', annotHtml);
         } catch (e) { /* anotación visual: no debe romper el render si cambian los internals de Chart.js */ }
       }
-      PFCharts.comboInversionVsPpto('chart-resumen-obra', buckets.map((b) => b.label), totalActualObra, totalPptoObra, acumActualObra, acumPptoObra);
+      if (obraAnualLabels.length) {
+        PFCharts.barInversionPeriodo('chart-obra-periodo', obraAnualLabels, obraNuevaActualAnual.map(Math.abs), obraNuevaPptoAnual.map(Math.abs));
+        // La brecha actual vs. ppto se muestra en el tooltip nativo del chart (al pasar el
+        // mouse), no en una caja fija — ver lineInversionAcumulada en charts.js.
+        PFCharts.lineInversionAcumulada('chart-obra-acum', obraAnualLabels, obraNuevaAcumActual.map(Math.abs), obraNuevaAcumPpto.map(Math.abs));
+      }
     }
 
     el.querySelectorAll('.cat-row[data-grupo]').forEach((row) => {
@@ -1015,6 +1174,18 @@
       aoa.push(['Caja acumulada', ...buckets.flatMap((b, i) => (hasPresupuesto ? [acumActual[i], acumActual[i] - acumPpto[i]] : [acumActual[i]]))]);
       PFReports.exportExcel('resumen_directorio.xlsx', 'Resumen Directorio', aoa);
     });
+
+    const btnObraExcel = el.querySelector('#resumen-obra-excel');
+    if (btnObraExcel) {
+      btnObraExcel.addEventListener('click', () => {
+        const header = ['Concepto', ...obraAnualLabels.flatMap((l) => [l + ' Actual', l + ' Ppto', l + ' Δ'])];
+        const aoa = [header];
+        lineasTablaObra.forEach((l) => aoa.push([l.nombre, ...obraAnualBuckets.flatMap((_, i) => [l.actual[i], l.ppto[i], l.actual[i] - l.ppto[i]])]));
+        aoa.push(['Flujo de caja', ...obraAnualBuckets.flatMap((_, i) => [tablaObraTotalActual[i], tablaObraTotalPpto[i], tablaObraTotalActual[i] - tablaObraTotalPpto[i]])]);
+        aoa.push(['Flujo de caja acumulado', ...obraAnualBuckets.flatMap((_, i) => [tablaObraAcumActual[i], tablaObraAcumPpto[i], tablaObraAcumActual[i] - tablaObraAcumPpto[i]])]);
+        PFReports.exportExcel('inversion_obras.xlsx', 'Inversión de obras', aoa);
+      });
+    }
   }
 
   // ------------------------------------------------------- Vista: Por proyecto
