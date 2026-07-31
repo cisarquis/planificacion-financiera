@@ -2,11 +2,13 @@
 // data.js — Capa de datos unificada
 // ----------------------------------------------------------------------------
 // Expone `window.DB`, una API async idéntica para dos backends:
-//   - 'firebase' : Firestore v8 (nube, multiusuario) cuando hay FIREBASE_CONFIG.
-//   - 'local'    : localStorage (un solo navegador) cuando no lo hay.
+//   - 'firebase' : Firestore (SDK modular v9+, vía window.__fb de firebase-init.js;
+//                  nube, multiusuario, con login) cuando hay FIREBASE_CONFIG.
+//   - 'local'    : localStorage (un solo navegador, sin login) cuando no lo hay.
 // app.js consume esta API sin saber qué backend está activo.
 //
-// Colecciones / claves:
+// Colecciones / claves (base Firestore "planificacion-financiera", NO la
+// "(default)" que usa la app Mira en el mismo proyecto — ver AGENTS.md):
 //   config/global            { cajaInicial, mesInicial:'YYYY-MM', moneda, umbralAlerta }
 //   categorias/{id}          { nombre, orden }
 //   proyectos/{id}           { nombre, categoriaId, moneda, proyeccion:{'YYYY-MM':neto},
@@ -14,6 +16,8 @@
 //                              ultimaImportacion, createdAt, updatedAt }
 //   cajaReal/{YYYY-MM}       { monto, nota }
 //   importLog/{id}           { projId, fileName, sheet, meses, importedAt, byEmail }
+//   roles/{email}            { role: 'admin'|'lector', nombre, addedAt } — solo lectura desde
+//                            la app; se crea/edita por consola o CLI (ver firestore.rules).
 // ============================================================================
 
 (function () {
@@ -123,81 +127,114 @@
     async listImportLog() {
       return this._get('importLog', []);
     },
+
+    // Modo local no tiene login: quien abre el navegador ya es dueño de sus
+    // propios datos, así que actúa siempre como admin.
+    async getRole() {
+      return 'admin';
+    },
   };
 
   // ----------------------------------------------------------------------
-  // Backend FIREBASE (Firestore v8)
+  // Backend FIREBASE (Firestore v9+ modular, vía el puente window.__fb que
+  // arma firebase-init.js — necesario para usar una base con nombre en vez
+  // de "(default)", algo que el SDK namespaced v8 no soporta).
   // ----------------------------------------------------------------------
   const Fire = {
-    get db() { return firebase.firestore(); },
+    get fb() { return window.__fb; },
+    get db() { return window.__fb.db; },
 
     async getConfig() {
-      const snap = await this.db.collection('config').doc('global').get();
-      return Object.assign({}, CONFIG_DEFAULT, snap.exists ? snap.data() : {});
+      const { doc, getDoc } = this.fb;
+      const snap = await getDoc(doc(this.db, 'config', 'global'));
+      return Object.assign({}, CONFIG_DEFAULT, snap.exists() ? snap.data() : {});
     },
     async setConfig(patch) {
-      patch = Object.assign({}, patch, { updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-      await this.db.collection('config').doc('global').set(patch, { merge: true });
+      const { doc, setDoc, serverTimestamp } = this.fb;
+      patch = Object.assign({}, patch, { updatedAt: serverTimestamp() });
+      await setDoc(doc(this.db, 'config', 'global'), patch, { merge: true });
       return this.getConfig();
     },
 
     async listCategorias() {
-      const qs = await this.db.collection('categorias').get();
+      const { collection, getDocs } = this.fb;
+      const qs = await getDocs(collection(this.db, 'categorias'));
       return qs.docs.map((d) => Object.assign({ id: d.id }, d.data())).sort((a, b) => (a.orden || 0) - (b.orden || 0));
     },
     async addCategoria(nombre) {
+      const { collection, addDoc } = this.fb;
       const list = await this.listCategorias();
-      const ref = await this.db.collection('categorias').add({ nombre, orden: list.length });
+      const ref = await addDoc(collection(this.db, 'categorias'), { nombre, orden: list.length });
       return { id: ref.id, nombre, orden: list.length };
     },
     async updateCategoria(id, patch) {
-      await this.db.collection('categorias').doc(id).set(patch, { merge: true });
+      const { doc, setDoc } = this.fb;
+      await setDoc(doc(this.db, 'categorias', id), patch, { merge: true });
     },
     async deleteCategoria(id) {
-      await this.db.collection('categorias').doc(id).delete();
+      const { doc, deleteDoc } = this.fb;
+      await deleteDoc(doc(this.db, 'categorias', id));
     },
 
     async listProyectos() {
-      const qs = await this.db.collection('proyectos').get();
+      const { collection, getDocs } = this.fb;
+      const qs = await getDocs(collection(this.db, 'proyectos'));
       return qs.docs.map((d) => Object.assign({ id: d.id }, d.data()));
     },
     async getProyecto(id) {
-      const snap = await this.db.collection('proyectos').doc(id).get();
-      return snap.exists ? Object.assign({ id: snap.id }, snap.data()) : null;
+      const { doc, getDoc } = this.fb;
+      const snap = await getDoc(doc(this.db, 'proyectos', id));
+      return snap.exists() ? Object.assign({ id: snap.id }, snap.data()) : null;
     },
     async addProyecto(data) {
+      const { collection, addDoc } = this.fb;
       const payload = Object.assign({ proyeccion: {}, presupuesto: {}, createdAt: Date.now(), updatedAt: Date.now() }, data);
-      const ref = await this.db.collection('proyectos').add(payload);
+      const ref = await addDoc(collection(this.db, 'proyectos'), payload);
       return Object.assign({ id: ref.id }, payload);
     },
     async updateProyecto(id, patch) {
+      const { doc, setDoc } = this.fb;
       patch = Object.assign({}, patch, { updatedAt: Date.now() });
-      await this.db.collection('proyectos').doc(id).set(patch, { merge: true });
+      await setDoc(doc(this.db, 'proyectos', id), patch, { merge: true });
       return this.getProyecto(id);
     },
     async deleteProyecto(id) {
-      await this.db.collection('proyectos').doc(id).delete();
+      const { doc, deleteDoc } = this.fb;
+      await deleteDoc(doc(this.db, 'proyectos', id));
     },
 
     async getCajaReal() {
-      const qs = await this.db.collection('cajaReal').get();
+      const { collection, getDocs } = this.fb;
+      const qs = await getDocs(collection(this.db, 'cajaReal'));
       const out = {};
       qs.docs.forEach((d) => { out[d.id] = d.data(); });
       return out;
     },
     async setCajaRealMes(mes, monto, nota) {
-      const ref = this.db.collection('cajaReal').doc(mes);
-      if (monto === null || monto === undefined || monto === '') await ref.delete();
-      else await ref.set({ monto: Number(monto), nota: nota || '' });
+      const { doc, setDoc, deleteDoc } = this.fb;
+      const ref = doc(this.db, 'cajaReal', mes);
+      if (monto === null || monto === undefined || monto === '') await deleteDoc(ref);
+      else await setDoc(ref, { monto: Number(monto), nota: nota || '' });
       return this.getCajaReal();
     },
 
     async addImportLog(entry) {
-      await this.db.collection('importLog').add(Object.assign({ importedAt: Date.now() }, entry));
+      const { collection, addDoc } = this.fb;
+      await addDoc(collection(this.db, 'importLog'), Object.assign({ importedAt: Date.now() }, entry));
     },
     async listImportLog() {
-      const qs = await this.db.collection('importLog').orderBy('importedAt', 'desc').limit(200).get();
+      const { collection, query, orderBy, limit, getDocs } = this.fb;
+      const qs = await getDocs(query(collection(this.db, 'importLog'), orderBy('importedAt', 'desc'), limit(200)));
       return qs.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+    },
+
+    // Rol de un correo (admin/lector), o null si no tiene documento asignado.
+    // Solo lectura desde la app — el documento se crea/edita por consola o CLI,
+    // nunca por las reglas de Firestore (ver AGENTS.md).
+    async getRole(email) {
+      const { doc, getDoc } = this.fb;
+      const snap = await getDoc(doc(this.db, 'roles', (email || '').toLowerCase()));
+      return snap.exists() ? snap.data().role : null;
     },
   };
 
@@ -208,17 +245,19 @@
     mode: 'local',
     backend: Local,
 
+    // En modo Firebase NO se siembra acá: las reglas de Firestore exigen sesión
+    // iniciada, y a esta altura todavía no hay login. app.js llama a
+    // DB.ensureSeed() explícitamente recién después de un login válido (ver
+    // setupAuthUI en app.js).
     async init() {
-      const cfg = window.FIREBASE_CONFIG;
-      if (cfg && cfg.apiKey && typeof firebase !== 'undefined') {
-        firebase.initializeApp(cfg);
+      if (window.__fb) {
         this.mode = 'firebase';
         this.backend = Fire;
       } else {
         this.mode = 'local';
         this.backend = Local;
+        await this.ensureSeed();
       }
-      await this.ensureSeed();
       return this.mode;
     },
 
@@ -243,6 +282,7 @@
     'listProyectos', 'getProyecto', 'addProyecto', 'updateProyecto', 'deleteProyecto',
     'getCajaReal', 'setCajaRealMes',
     'addImportLog', 'listImportLog',
+    'getRole',
   ];
   METHODS.forEach((m) => {
     DB[m] = function (...args) { return this.backend[m](...args); };

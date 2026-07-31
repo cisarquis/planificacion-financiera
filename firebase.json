@@ -1,0 +1,9 @@
+{
+  "firestore": [
+    {
+      "database": "planificacion-financiera",
+      "rules": "firestore.rules",
+      "indexes": "firestore.indexes.json"
+    }
+  ]
+}

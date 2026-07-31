@@ -65,6 +65,7 @@
   const state = {
     mode: 'local',
     user: null,
+    role: null, // 'admin' | 'lector' | null (null = local o sin rol asignado)
     config: { cajaInicial: 0, mesInicial: '', moneda: 'UF', umbralAlerta: 0 },
     categorias: [],
     proyectos: [],
@@ -696,6 +697,9 @@
   // Clasifica (una sola vez, perezoso) y persiste grupoObra en los proyectos que no lo tengan
   // todavía, para que el drag-and-drop del usuario nunca se pise con un recálculo automático.
   async function ensureGruposObra() {
+    // Clasificación automática = escritura; un lector no tiene permiso en Firestore para
+    // esto (las reglas lo rechazarían), así que ni se intenta — el admin la completa cuando entre.
+    if (!isAdmin()) return false;
     const finCat = state.categorias.find((c) => c.nombre === CAT_FINANCIAMIENTO);
     const pendientes = state.proyectos.filter((p) => !p.grupoObra && (!finCat || p.categoriaId !== finCat.id));
     if (!pendientes.length) return false;
@@ -973,8 +977,8 @@
           const bs = i > 0 ? periodBorder : '';
           return `<td class="num" style="${bs}">${PF.fmtMoney(pp)}</td><td class="num">${PF.fmtMoney(a)}</td><td class="num ${v < 0 ? 'neg' : 'pos'}">${PF.fmtMoney(v)}</td>`;
         }).join('');
-        return `<tr class="proj-row" draggable="true" data-proj-id="${p.id}">
-          <td class="proj-col"><span class="row-label" style="padding-left:14px; cursor:grab"><i class="bi bi-dot"></i><span>${PF.esc(p.nombre)}</span></span></td>
+        return `<tr class="proj-row" ${isAdmin() ? 'draggable="true"' : ''} data-proj-id="${p.id}">
+          <td class="proj-col"><span class="row-label" style="padding-left:14px; ${isAdmin() ? 'cursor:grab' : ''}"><i class="bi bi-dot"></i><span>${PF.esc(p.nombre)}</span></span></td>
           ${pCells}
         </tr>`;
       }).join('') : '';
@@ -1202,14 +1206,14 @@
     el.innerHTML = `
       <div class="d-flex justify-content-between align-items-center mb-3">
         <span class="text-muted">${state.proyectos.length} proyecto(s)</span>
-        <button class="btn btn-sm btn-primary" id="btn-nuevo-proj"><i class="bi bi-plus-lg"></i> Nuevo proyecto</button>
+        ${isAdmin() ? '<button class="btn btn-sm btn-primary" id="btn-nuevo-proj"><i class="bi bi-plus-lg"></i> Nuevo proyecto</button>' : ''}
       </div>
       ${porCat}
       ${sinCat.length ? `<div class="mb-3"><div class="fw-semibold mb-2 text-muted">Sin categoría</div>
         <div class="row g-2">${sinCat.map(proyectoCard).join('')}</div></div>` : ''}
       <div id="proj-detail"></div>`;
 
-    document.getElementById('btn-nuevo-proj').addEventListener('click', () => nuevoProyectoDialog());
+    if (isAdmin()) document.getElementById('btn-nuevo-proj').addEventListener('click', () => nuevoProyectoDialog());
     el.querySelectorAll('[data-proj]').forEach((c) => c.addEventListener('click', () => renderProyectoDetail(c.dataset.proj)));
   }
 
@@ -1244,8 +1248,8 @@
             ${p.ultimaImportacion ? '· última importación: ' + PF.esc(p.ultimaImportacion.fileName || '') : ''}</span>
           </div>
           <div>
-            <button class="btn btn-sm btn-outline-secondary" id="btn-edit-proj"><i class="bi bi-pencil"></i></button>
-            <button class="btn btn-sm btn-outline-danger" id="btn-del-proj"><i class="bi bi-trash"></i></button>
+            ${isAdmin() ? `<button class="btn btn-sm btn-outline-secondary" id="btn-edit-proj"><i class="bi bi-pencil"></i></button>
+            <button class="btn btn-sm btn-outline-danger" id="btn-del-proj"><i class="bi bi-trash"></i></button>` : ''}
           </div>
         </div>
         <div class="chart-box mt-3"><canvas id="chart-proj-detail"></canvas></div>
@@ -1268,11 +1272,13 @@
         plugins: { tooltip: { callbacks: { label: (it) => `${it.dataset.label}: ${PF.fmtNum(it.parsed.y)}` } } },
         scales: { y: { ticks: { callback: PF.fmtNum } } } },
     });
-    document.getElementById('btn-edit-proj').addEventListener('click', () => nuevoProyectoDialog(p));
-    document.getElementById('btn-del-proj').addEventListener('click', async () => {
-      if (!confirm(`¿Eliminar el proyecto "${p.nombre}"? Esto borra su proyección.`)) return;
-      await DB.deleteProyecto(p.id); await loadAll(); toast('Proyecto eliminado', 'danger'); renderProyectos();
-    });
+    if (isAdmin()) {
+      document.getElementById('btn-edit-proj').addEventListener('click', () => nuevoProyectoDialog(p));
+      document.getElementById('btn-del-proj').addEventListener('click', async () => {
+        if (!confirm(`¿Eliminar el proyecto "${p.nombre}"? Esto borra su proyección.`)) return;
+        await DB.deleteProyecto(p.id); await loadAll(); toast('Proyecto eliminado', 'danger'); renderProyectos();
+      });
+    }
     box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
@@ -1321,6 +1327,10 @@
 
   function renderImportar() {
     const el = document.getElementById('importar');
+    if (!isAdmin()) {
+      el.innerHTML = emptyState('Solo administradores', 'Pídele a un administrador que importe el Excel por ti.', null);
+      return;
+    }
     el.innerHTML = `
       <div class="panel">
         <div class="btn-group" role="group">
@@ -1854,7 +1864,7 @@
       return `<tr>
         <td>${PF.monthLabel(m)}</td>
         <td class="num">${proj != null ? PF.fmtMoney(proj) : '—'}</td>
-        <td class="num" style="width:160px"><input type="number" class="form-control form-control-sm num caja-input" data-mes="${m}" value="${real}"></td>
+        <td class="num" style="width:160px"><input type="number" class="form-control form-control-sm num caja-input" data-mes="${m}" value="${real}" ${isAdmin() ? '' : 'disabled'}></td>
         <td class="num ${desv == null ? '' : (desv < 0 ? 'neg' : 'pos')}">${desv == null ? '—' : PF.fmtMoney(desv)}</td>
       </tr>`;
     }).join('');
@@ -1862,34 +1872,37 @@
     el.innerHTML = `
       <div class="panel">
         <h6>Punto de partida</h6>
+        ${!isAdmin() ? '<p class="text-muted small mb-0">Solo un administrador puede cambiar esto.</p>' : ''}
         <div class="row g-2 align-items-end">
           <div class="col-md-4"><label class="form-label small">Caja inicial (${state.config.moneda})</label>
-            <input type="number" class="form-control" id="cfg-caja-inicial" value="${state.config.cajaInicial}"></div>
+            <input type="number" class="form-control" id="cfg-caja-inicial" value="${state.config.cajaInicial}" ${isAdmin() ? '' : 'disabled'}></div>
           <div class="col-md-4"><label class="form-label small">Mes inicial</label>
-            <input type="month" class="form-control" id="cfg-mes-inicial" value="${state.config.mesInicial}"></div>
-          <div class="col-md-4"><button class="btn btn-primary" id="cfg-save-caja">Guardar</button></div>
+            <input type="month" class="form-control" id="cfg-mes-inicial" value="${state.config.mesInicial}" ${isAdmin() ? '' : 'disabled'}></div>
+          <div class="col-md-4">${isAdmin() ? '<button class="btn btn-primary" id="cfg-save-caja">Guardar</button>' : ''}</div>
         </div>
       </div>
       <div class="panel">
-        <h6>Caja real del banco (ingresa el saldo de cada mes)</h6>
+        <h6>Caja real del banco${isAdmin() ? ' (ingresa el saldo de cada mes)' : ''}</h6>
         ${months.length ? `<table class="table table-sm">
           <thead><tr><th>Mes</th><th class="num">Caja proyectada</th><th class="num">Caja real (banco)</th><th class="num">Desviación</th></tr></thead>
           <tbody>${rows}</tbody></table>` : '<div class="text-muted">Importa proyectos para ver los meses.</div>'}
       </div>`;
 
-    el.querySelector('#cfg-save-caja').addEventListener('click', async () => {
-      await DB.setConfig({
-        cajaInicial: Number(el.querySelector('#cfg-caja-inicial').value) || 0,
-        mesInicial: el.querySelector('#cfg-mes-inicial').value || '',
+    if (isAdmin()) {
+      el.querySelector('#cfg-save-caja').addEventListener('click', async () => {
+        await DB.setConfig({
+          cajaInicial: Number(el.querySelector('#cfg-caja-inicial').value) || 0,
+          mesInicial: el.querySelector('#cfg-mes-inicial').value || '',
+        });
+        await loadAll(); toast('Guardado', 'success'); renderCaja();
       });
-      await loadAll(); toast('Guardado', 'success'); renderCaja();
-    });
-    el.querySelectorAll('.caja-input').forEach((inp) => {
-      inp.addEventListener('change', async () => {
-        await DB.setCajaRealMes(inp.dataset.mes, inp.value);
-        await loadAll(); renderCaja();
+      el.querySelectorAll('.caja-input').forEach((inp) => {
+        inp.addEventListener('change', async () => {
+          await DB.setCajaRealMes(inp.dataset.mes, inp.value);
+          await loadAll(); renderCaja();
+        });
       });
-    });
+    }
   }
 
   // ------------------------------------------------------- Vista: Programar pagos
@@ -1997,6 +2010,10 @@
   // ------------------------------------------------------- Vista: Configuración
   function renderConfig() {
     const el = document.getElementById('config');
+    if (!isAdmin()) {
+      el.innerHTML = emptyState('Solo administradores', 'Pídele a un administrador que cambie la configuración.', null);
+      return;
+    }
     const catRows = state.categorias.map((c) => `<tr>
       <td><input class="form-control form-control-sm cat-name" data-id="${c.id}" value="${PF.esc(c.nombre)}"></td>
       <td class="num" style="width:120px"><button class="btn btn-sm btn-outline-danger cat-del" data-id="${c.id}"><i class="bi bi-trash"></i></button></td>
@@ -2083,41 +2100,60 @@
   }
 
   // ------------------------------------------------------------------ Auth
+  // true en modo local (sin login, dueño de sus propios datos) o si el rol
+  // asignado en Firestore es 'admin'. Se usa para mostrar/ocultar los
+  // controles de escritura (importar, caja del banco, configuración, alta/
+  // edición/borrado de proyecto, corrección de grupoObra) — la app solo
+  // esconde los botones; la app.js/data.js del lector le pega igual a
+  // Firestore si intenta saltarse la UI, pero ahí las reglas de seguridad lo
+  // rechazan (ver firestore.rules), así que la protección real no depende
+  // de este helper.
+  function isAdmin() {
+    return state.role === 'admin';
+  }
+
   function setupAuthUI() {
     const overlay = document.getElementById('login-overlay');
+    const noAccess = document.getElementById('no-access-overlay');
     const shell = document.getElementById('app-shell');
-    const showLogin = () => { overlay.classList.remove('d-none'); shell.style.display = 'none'; };
-    const showApp = () => { overlay.classList.add('d-none'); shell.style.display = 'flex'; };
+    const showLogin = () => { overlay.classList.remove('d-none'); noAccess.classList.add('d-none'); shell.style.display = 'none'; };
+    const showNoAccess = (email) => { noAccess.classList.remove('d-none'); overlay.classList.add('d-none'); shell.style.display = 'none'; document.getElementById('no-access-email').textContent = email; };
+    const showApp = () => { overlay.classList.add('d-none'); noAccess.classList.add('d-none'); shell.style.display = 'flex'; };
 
     const errBox = document.getElementById('login-error');
     const showErr = (m) => { errBox.textContent = m; errBox.classList.remove('d-none'); };
 
-    firebase.auth().onAuthStateChanged(async (user) => {
-      if (user) {
-        const dom = window.ALLOWED_EMAIL_DOMAIN;
-        if (dom && !(user.email || '').endsWith('@' + dom)) {
-          showErr('Solo cuentas @' + dom); await firebase.auth().signOut(); showLogin(); return;
-        }
-        state.user = user;
-        document.getElementById('user-box').classList.remove('d-none');
-        document.getElementById('user-email').textContent = user.email;
-        showApp();
-        await loadAll(); showView('dashboard');
-      } else { state.user = null; showLogin(); }
+    const { auth, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } = window.__fb;
+
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) { state.user = null; state.role = null; showLogin(); return; }
+
+      const dom = window.ALLOWED_EMAIL_DOMAIN;
+      if (dom && !(user.email || '').toLowerCase().endsWith('@' + dom)) {
+        showErr('Solo cuentas @' + dom); await signOut(auth); showLogin(); return;
+      }
+
+      const role = await DB.getRole(user.email);
+      if (!role) { showNoAccess(user.email); return; }
+
+      state.user = user;
+      state.role = role;
+      document.getElementById('user-box').classList.remove('d-none');
+      document.getElementById('user-email').textContent = user.email;
+      showApp();
+      await DB.ensureSeed();
+      await loadAll(); showView('dashboard');
     });
 
-    document.getElementById('login-btn').addEventListener('click', async () => {
+    document.getElementById('login-google').addEventListener('click', async () => {
       try {
-        await firebase.auth().signInWithEmailAndPassword(
-          document.getElementById('login-email').value.trim(),
-          document.getElementById('login-password').value);
+        const provider = new GoogleAuthProvider();
+        if (window.ALLOWED_EMAIL_DOMAIN) provider.setCustomParameters({ hd: window.ALLOWED_EMAIL_DOMAIN });
+        await signInWithPopup(auth, provider);
       } catch (e) { showErr(e.message); }
     });
-    document.getElementById('login-google').addEventListener('click', async () => {
-      try { await firebase.auth().signInWithPopup(new firebase.auth.GoogleAuthProvider()); }
-      catch (e) { showErr(e.message); }
-    });
-    document.getElementById('logout-btn').addEventListener('click', () => firebase.auth().signOut());
+    document.getElementById('logout-btn').addEventListener('click', () => signOut(auth));
+    document.getElementById('no-access-logout').addEventListener('click', () => signOut(auth));
   }
 
   // ------------------------------------------------------------------ Init
@@ -2131,6 +2167,7 @@
     if (state.mode === 'firebase') {
       setupAuthUI(); // el resto se dispara en onAuthStateChanged
     } else {
+      state.role = 'admin';
       await loadAll();
       showView('dashboard');
     }

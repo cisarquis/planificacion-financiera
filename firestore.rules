@@ -1,0 +1,57 @@
+rules_version = '2';
+// Reglas para la base "planificacion-financiera" del proyecto mira-87ec6.
+// NO tocan la base "(default)" que usa la app Mira — son bases completamente
+// separadas, cada una con sus propias reglas (ver AGENTS.md).
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Solo cuentas @ingevec.cl autenticadas (Google Sign-In) cuentan como "logueadas".
+    function isSignedIn() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email.matches('.*@ingevec[.]cl$');
+    }
+    // Rol asignado en roles/{email}, o null si no tiene documento.
+    function myRole() {
+      return get(/databases/$(database)/documents/roles/$(request.auth.token.email)).data.role;
+    }
+    function hasRole() {
+      return isSignedIn() && myRole() in ['admin', 'lector'];
+    }
+    function isAdmin() {
+      return isSignedIn() && myRole() == 'admin';
+    }
+
+    // roles/*: cualquier cuenta @ingevec.cl logueada puede leer su propio rol (y el de
+    // otros, no hay dato sensible ahí); nadie puede escribir desde la app — se administra
+    // a mano por consola/CLI para evitar que alguien se autoasigne "admin". Deliberadamente
+    // NO se usa un wildcard genérico tipo /{collection}/{docId} para el resto de las
+    // colecciones: en reglas de Firestore, un match más específico (como este) NO gana por
+    // sobre uno genérico que también calce el mismo path — se evalúan todos y basta que uno
+    // permita para que se permita. Listar las colecciones a mano evita ese solapamiento.
+    match /roles/{email} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /categorias/{id} {
+      allow read: if hasRole();
+      allow write: if isAdmin();
+    }
+    match /proyectos/{id} {
+      allow read: if hasRole();
+      allow write: if isAdmin();
+    }
+    match /config/{id} {
+      allow read: if hasRole();
+      allow write: if isAdmin();
+    }
+    match /cajaReal/{id} {
+      allow read: if hasRole();
+      allow write: if isAdmin();
+    }
+    match /importLog/{id} {
+      allow read: if hasRole();
+      allow write: if isAdmin();
+    }
+  }
+}

@@ -1,7 +1,10 @@
 # AGENTS.md — Planificación Financiera (Flujo de Caja Consolidado)
 
-Proyecto **independiente**, sin relación con Mira (otra app del mismo usuario). No comparte carpeta,
-repositorio ni proyecto Firebase con Mira.
+Proyecto **independiente** de Mira (otra app de Ingevec) en cuanto a carpeta, repositorio y datos.
+Sí **comparte el proyecto de Firebase** (`mira-87ec6`, cuenta/facturación de la empresa) — pero usa su
+**propia base de datos Firestore** (`planificacion-financiera`, no la `(default)` que usa Mira), así
+que no hay ninguna colección ni documento en común entre ambas apps. Ver "Auth y roles" más abajo
+para el detalle completo de por qué se armó así.
 
 ## Qué es
 
@@ -24,23 +27,27 @@ botón "Restablecer categorías por defecto" que borra las categorías sin proye
 ## Stack
 
 HTML/JS vanilla + Bootstrap 5.3.3 + Chart.js + SheetJS (xlsx) + jsPDF/autotable, todo vía CDN (sin
-build step, sin `npm install` para producción). Persistencia: Firebase (Firestore v8 namespaced) o,
-si `firebase-config.js` no tiene credenciales, **modo local** con `localStorage` (mismo código,
-`data.js` abstrae ambos backends).
+build step, sin `npm install` para producción). Persistencia: Firebase (Firestore, SDK **modular**
+v10) o, si `firebase-config.js` no tiene credenciales, **modo local** con `localStorage` (mismo
+código, `data.js` abstrae ambos backends). Login con Google, roles admin/lector — ver "Auth y roles".
 
 ## Estructura
 
 ```
-index.html            Login + shell (sidebar + secciones)
-app.js                Orquestador: estado, navegación, cálculos, render de cada vista
-data.js               Capa de datos (window.DB) — Firestore v8 o localStorage
+index.html            Login + "sin acceso" + shell (sidebar + secciones)
+app.js                Orquestador: estado, navegación, cálculos, render de cada vista, auth/roles
+data.js               Capa de datos (window.DB) — Firestore (modular) o localStorage
+firebase-init.js      Único módulo ES de la app: SDK modular de Firebase, expone window.__fb
+firebase-config.js    Config de Firebase (proyecto mira-87ec6) + database ID + dominio permitido
+firestore.rules       Reglas de seguridad de la base "planificacion-financiera" (roles)
+firebase.json         Config de deploy (array multi-base — ver "Auth y roles")
+.firebaserc           Proyecto default (mira-87ec6) para el Firebase CLI
 importer.js           Parseo/mapeo/extracción de Excel (window.PFImporter)
 charts.js             Helpers de gráficos (window.PFCharts): Chart.js (Por categoría, Resumen
                        Directorio) + SVG a mano (Consolidado, sparklines de Flujo de Caja)
 reports.js            Exportación Excel/PDF (window.PFReports)
-firebase-config.js     Config del proyecto Firebase PROPIO (null = modo local)
 style.css             Estilos
-.claude/launch.json   Preview local puerto 3300 (usa `npx serve .`)
+.claude/launch.json   Preview local puerto 3301 (usa `npx serve .`)
 ```
 
 ## Modelo de datos (Firestore o localStorage, mismas claves)
@@ -61,6 +68,54 @@ importLog/{id}      { projId, fileName, sheet, meses, importedAt, byEmail }
 carga **una sola vez** (vía el importador, eligiendo el destino "Presupuesto") y debe quedar fija —
 `saveImport` en `app.js` pide confirmación antes de sobreescribirla si ya tiene meses cargados. Se usa
 para comparar "cómo vamos" contra el presupuesto original en la vista **Resumen Directorio**.
+
+## Auth y roles
+
+Login obligatorio (Google, `signInWithPopup` + `GoogleAuthProvider`, restringido a
+`window.ALLOWED_EMAIL_DOMAIN` = `ingevec.cl`), con dos roles:
+- **admin**: puede escribir — importar Excel (los 3 modos), Caja del banco, Configuración, alta/
+  edición/borrado manual de proyecto, y la corrección por drag-and-drop de `grupoObra` en Resumen
+  Directorio.
+- **lector**: todo lo demás, sin ninguna de esas acciones — las ve deshabilitadas/ocultas
+  (`isAdmin()` en `app.js`, gatea cada botón/formulario en el punto donde se renderiza), pero la
+  protección real es del lado del servidor (`firestore.rules`): si alguien se saltara la UI, las
+  reglas igual rechazan la escritura.
+
+**Por qué comparte proyecto de Firebase con Mira pero no la base de datos**: se evaluó un proyecto
+Firebase 100% aparte, pero la cuenta de Google del usuario (`csarquis@ingevec.cl`) pertenece a la
+organización de Ingevec y esa organización **bloquea crear proyectos nuevos de Google Cloud** (ni por
+CLI ni por consola — se confirmó con ambos). Firestore sí soporta **múltiples bases de datos por
+proyecto** (GA desde 2024), así que la solución fue pedirle a Andrés Lowener (Propietario del proyecto
+`mira-87ec6`; este usuario es solo Editor ahí) que creara una base nueva y vacía llamada
+`planificacion-financiera` — mismo proyecto/facturación de la empresa, cero colecciones ni documentos
+en común con la base `(default)` que usa Mira.
+
+**Por qué el SDK es modular (v10), no namespaced (v8)**: Firestore multi-base de datos **no existe**
+en el SDK namespaced clásico (`firebase.firestore()` siempre apunta a `(default)`, sin forma de pasar
+un database ID). `firebase-init.js` es el único módulo ES de la app (`<script type="module">`,
+cargado antes que `data.js`/`app.js` en `index.html` aunque por spec los módulos siempre corren
+*después* que los scripts clásicos — no importa, porque `DB.init()`/`Fire.*` solo acceden a
+`window.__fb` cuando de verdad se llaman, nunca al cargar el archivo) — hace `initializeApp` +
+`getAuth` + `getFirestore(app, 'planificacion-financiera')` y cuelga todo en `window.__fb` (instancias
++ funciones modulares) para que `data.js` y `app.js`, que siguen siendo scripts clásicos, lo usen sin
+tener que convertirse ellos mismos en módulos.
+
+**Colección `roles/{email}`** (doc ID = correo en minúsculas) → `{ role: 'admin'|'lector' }`. Se lee
+desde la app (`DB.getRole(email)`, solo lectura) pero **nunca se escribe desde la app** — las reglas
+lo bloquean a propósito (`allow write: if false`), para que nadie pueda autoasignarse "admin" vía la
+propia UI. El primer admin (y cualquier alta/baja de rol después) se crea a mano en la consola de
+Firebase o por Firebase CLI directamente sobre Firestore — es la única excepción a "todo pasa por
+`window.DB`" en toda la app.
+
+**`firebase.json` usa el formato de array multi-base** (`"firestore": [{ "database": "...", "rules":
+"...", "indexes": "..." }]`), necesario porque el proyecto tiene más de una base de datos. Ojo con un
+bug real del CLI: `firebase deploy --only firestore:rules` **falla en silencio** (exit 0, no despliega
+nada) en proyectos con config multi-base — hay que usar `firebase deploy --only firestore` (sin
+`:rules`) para que realmente suba las reglas.
+
+**Modo local** (sin `FIREBASE_CONFIG`) no tiene login ni roles: `DB.getRole()` del backend local
+siempre devuelve `'admin'`, porque quien abre el navegador ya es dueño de sus propios datos en
+`localStorage` — no tiene sentido pedirle login a sí mismo.
 
 ## Formato de Excel esperado (confirmado con archivo real de ejemplo)
 
@@ -97,10 +152,12 @@ proyectos nuevos (por defecto "Otros"); los que ya existen conservan su categor�
 
 ## Reglas críticas
 
-- **No mezclar con Mira**: Firebase, colecciones, deploy y repo son independientes. Nunca apuntar
-  comandos `firebase deploy` de este proyecto al proyecto de Mira, ni viceversa.
-- `firebase-config.js` empieza con `window.FIREBASE_CONFIG = null` (modo local). Se activa el modo
-  nube solo cuando el usuario pega su propio config de un proyecto Firebase creado para esta app.
+- **No mezclar con Mira a nivel de datos**: comparten proyecto de Firebase (`mira-87ec6`) pero NO base
+  de datos (`planificacion-financiera` vs `(default)` de Mira) — nunca apuntar código o reglas de esta
+  app a la base `(default)`, ni tocar las reglas/colecciones de Mira desde acá. Ver "Auth y roles".
+- `firebase-config.js` ya tiene el config real de `mira-87ec6` + `FIREBASE_DATABASE_ID =
+  'planificacion-financiera'` — no volver a ponerlo en `null` salvo que se quiera forzar modo local
+  a propósito (por ejemplo para probar sin depender de Firebase).
 - Los cálculos derivados (flujo neto, caja acumulada, alertas) viven en `app.js` (`buildTimeline`,
   `netByMonth`, `projectedSeries`) — son puros, no tocan el DOM directamente.
 
