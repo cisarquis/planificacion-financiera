@@ -2118,8 +2118,7 @@
     busyOnClick(el.querySelector('#btn-del-all-proj'), 'Borrando...', async () => {
       const total = state.proyectos.length;
       if (!total) { toast('No hay proyectos que borrar', 'warning'); return; }
-      const escrito = prompt(`Esto borra los ${total} proyecto(s) sin poder deshacerlo. Escribe BORRAR para confirmar.`);
-      if (escrito !== 'BORRAR') return;
+      if (!confirm(`¿Borrar los ${total} proyecto(s)? No se puede deshacer.`)) return;
       // En paralelo, no uno por uno: con 340 proyectos, borrarlos secuencialmente se sentía
       // lentísimo (una espera de red por cada uno); Firestore no tiene problema con muchas
       // escrituras concurrentes.
