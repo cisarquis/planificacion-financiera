@@ -287,7 +287,7 @@
 
   function renderDashboard() {
     const el = document.getElementById('dashboard');
-    if (!state.proyectos.length) { el.innerHTML = emptyState('No hay proyectos todavía', 'Importa un Excel para comenzar.', 'importar'); wireEmpty(el); return; }
+    if (!state.proyectos.length) { el.innerHTML = emptyState('No hay proyectos todavía', 'Importa un Excel para comenzar (menú "Importar Excel").'); return; }
 
     const t = buildTimeline();
     const cur = PF.currentMonth();
@@ -473,7 +473,7 @@
   // ------------------------------------------------------- Vista: Por categoría
   function renderCategoriasView() {
     const el = document.getElementById('categorias-view');
-    if (!state.proyectos.length) { el.innerHTML = emptyState('Sin datos', 'Importa proyectos para ver el desglose por categoría.', 'importar'); wireEmpty(el); return; }
+    if (!state.proyectos.length) { el.innerHTML = emptyState('Sin datos', 'Importa proyectos para ver el desglose por categoría.'); return; }
 
     const months = allMonths();
     const labels = months.map(PF.monthLabel);
@@ -539,7 +539,7 @@
 
   function renderFlujoMensual() {
     const el = document.getElementById('flujo-mensual');
-    if (!state.proyectos.length) { el.innerHTML = emptyState('Sin datos', 'Importa proyectos para ver el flujo de caja mensual.', 'importar'); wireEmpty(el); return; }
+    if (!state.proyectos.length) { el.innerHTML = emptyState('Sin datos', 'Importa proyectos para ver el flujo de caja mensual.'); return; }
 
     const t = buildTimeline();
     const months = t.months;
@@ -740,7 +740,7 @@
 
   function renderResumenDirectorio() {
     const el = document.getElementById('resumen-directorio');
-    if (!state.proyectos.length) { el.innerHTML = emptyState('Sin datos', 'Importa proyectos para ver el resumen para directorio.', 'importar'); wireEmpty(el); return; }
+    if (!state.proyectos.length) { el.innerHTML = emptyState('Sin datos', 'Importa proyectos para ver el resumen para directorio.'); return; }
 
     ensureGruposObra().then((changed) => { if (changed) renderResumenDirectorio(); });
 
@@ -1328,7 +1328,7 @@
   function renderImportar() {
     const el = document.getElementById('importar');
     if (!isAdmin()) {
-      el.innerHTML = emptyState('Solo administradores', 'Pídele a un administrador que importe el Excel por ti.', null);
+      el.innerHTML = emptyState('Solo administradores', 'Pídele a un administrador que importe el Excel por ti.');
       return;
     }
     el.innerHTML = `
@@ -1910,7 +1910,7 @@
     const el = document.getElementById('pagos');
     const cur = PF.currentMonth();
     const months = allMonths().filter((m) => m >= cur);
-    if (!months.length) { el.innerHTML = emptyState('Sin pagos futuros', 'No hay egresos proyectados desde este mes.', 'importar'); wireEmpty(el); return; }
+    if (!months.length) { el.innerHTML = emptyState('Sin pagos futuros', 'No hay egresos proyectados desde este mes.'); return; }
 
     // Por cada mes futuro, lista los egresos (flujo negativo) por proyecto.
     let bodyRows = '', totalGlobal = 0;
@@ -2011,7 +2011,7 @@
   function renderConfig() {
     const el = document.getElementById('config');
     if (!isAdmin()) {
-      el.innerHTML = emptyState('Solo administradores', 'Pídele a un administrador que cambie la configuración.', null);
+      el.innerHTML = emptyState('Solo administradores', 'Pídele a un administrador que cambie la configuración.');
       return;
     }
     const catRows = state.categorias.map((c) => `<tr>
@@ -2090,13 +2090,11 @@
   }
 
   // ------------------------------------------------------------------ Helpers UI
-  function emptyState(title, sub, gotoView) {
+  // Sin botón de acceso directo a Importar: esa vista solo se llega por el menú lateral,
+  // a propósito (el usuario no quiere el atajo repetido en cada pantalla vacía).
+  function emptyState(title, sub) {
     return `<div class="empty-state"><div class="empty-icon"><i class="bi bi-inbox"></i></div>
-      <h5>${PF.esc(title)}</h5><p>${PF.esc(sub)}</p>
-      ${gotoView ? `<button class="btn btn-primary" data-goto="${gotoView}"><i class="bi bi-file-earmark-arrow-up me-1"></i>Importar Excel</button>` : ''}</div>`;
-  }
-  function wireEmpty(el) {
-    el.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => showView(b.dataset.goto)));
+      <h5>${PF.esc(title)}</h5><p>${PF.esc(sub)}</p></div>`;
   }
 
   // ------------------------------------------------------------------ Auth
