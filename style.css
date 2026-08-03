@@ -244,6 +244,8 @@ body {
   color: var(--pf-slate-700); cursor: pointer; transition: background .12s, border-color .12s;
 }
 .flujo-btn:hover { background: var(--pf-slate-50); border-color: var(--pf-slate-300); }
+.flujo-btn.active { background: var(--pf-primary); border-color: var(--pf-primary); color: #fff; }
+.flujo-btn.active:hover { background: var(--pf-primary-700); }
 
 /* ---------- Tabla con columna fija (Flujo de Caja mensual) ---------- */
 .table-sticky-col { max-width: 100%; }

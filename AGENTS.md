@@ -29,7 +29,7 @@ botón "Restablecer categorías por defecto" que borra las categorías sin proye
 HTML/JS vanilla + Bootstrap 5.3.3 + Chart.js + SheetJS (xlsx) + jsPDF/autotable, todo vía CDN (sin
 build step, sin `npm install` para producción). Persistencia: Firebase (Firestore, SDK **modular**
 v10) o, si `firebase-config.js` no tiene credenciales, **modo local** con `localStorage` (mismo
-código, `data.js` abstrae ambos backends). Login con Google, roles admin/lector — ver "Auth y roles".
+código, `data.js` abstrae ambos backends). Login con Google, roles dueño/editor/lector — ver "Auth y roles".
 
 ## Estructura
 
@@ -72,14 +72,28 @@ para comparar "cómo vamos" contra el presupuesto original en la vista **Resumen
 ## Auth y roles
 
 Login obligatorio (Google, `signInWithPopup` + `GoogleAuthProvider`, restringido a
-`window.ALLOWED_EMAIL_DOMAIN` = `ingevec.cl`), con dos roles:
-- **admin**: puede escribir — importar Excel (los 3 modos), Caja del banco, Configuración, alta/
-  edición/borrado manual de proyecto, y la corrección por drag-and-drop de `grupoObra` en Resumen
-  Directorio.
+`window.ALLOWED_EMAIL_DOMAIN` = `ingevec.cl`), con tres roles:
+- **dueño**: todo lo que puede un editor, más administra desde la app quién es editor/lector (vista
+  "Usuarios", solo visible para dueño vía `isOwner()`). Promover a alguien a "dueño" queda **fuera**
+  de la app a propósito (ver más abajo) — sigue siendo un paso manual en la consola/CLI de Firebase.
+- **editor** (antes "admin"): puede escribir — importar Excel (los 3 modos), Caja del banco,
+  Configuración, alta/edición/borrado manual de proyecto, edición manual del flujo de caja mensual
+  celda por celda (botón "Editar flujo" en Flujo de Caja mensual), y la corrección por
+  drag-and-drop de `grupoObra` en Resumen Directorio.
 - **lector**: todo lo demás, sin ninguna de esas acciones — las ve deshabilitadas/ocultas
-  (`isAdmin()` en `app.js`, gatea cada botón/formulario en el punto donde se renderiza), pero la
-  protección real es del lado del servidor (`firestore.rules`): si alguien se saltara la UI, las
+  (`isAdmin()` en `app.js` sigue con ese nombre por compatibilidad con sus ~14 usos, pero ahora es
+  `true` para 'editor' o 'dueño'; gatea cada botón/formulario en el punto donde se renderiza), pero
+  la protección real es del lado del servidor (`firestore.rules`): si alguien se saltara la UI, las
   reglas igual rechazan la escritura.
+
+**Editar el flujo de caja a mano**: en "Flujo de Caja mensual", un editor/dueño puede activar "Editar
+flujo" — las celdas de las filas de proyecto pasan a `<input type="number">`; las filas de categoría/
+total/acumulado/caja real siguen de solo lectura (son sumas calculadas). Cada cambio hace
+`DB.updateProyecto(id, { proyeccion: {...} })` y actualiza `state.proyectos` en memoria (sin recargar
+los ~170+ proyectos completos) antes de volver a pintar la vista. Como "Exportar por proyecto" y el
+nuevo botón **"Exportar como archivo maestro"** (en Reportes, mismo layout que el importador: una hoja
+por categoría, una fila por proyecto) leen esa misma estructura en vivo, cualquier edición manual ya
+queda reflejada al exportar sin lógica extra de reconciliación.
 
 **Por qué comparte proyecto de Firebase con Mira pero no la base de datos**: se evaluó un proyecto
 Firebase 100% aparte, pero la cuenta de Google del usuario (`csarquis@ingevec.cl`) pertenece a la
@@ -100,12 +114,14 @@ cargado antes que `data.js`/`app.js` en `index.html` aunque por spec los módulo
 + funciones modulares) para que `data.js` y `app.js`, que siguen siendo scripts clásicos, lo usen sin
 tener que convertirse ellos mismos en módulos.
 
-**Colección `roles/{email}`** (doc ID = correo en minúsculas) → `{ role: 'admin'|'lector' }`. Se lee
-desde la app (`DB.getRole(email)`, solo lectura) pero **nunca se escribe desde la app** — las reglas
-lo bloquean a propósito (`allow write: if false`), para que nadie pueda autoasignarse "admin" vía la
-propia UI. El primer admin (y cualquier alta/baja de rol después) se crea a mano en la consola de
-Firebase o por Firebase CLI directamente sobre Firestore — es la única excepción a "todo pasa por
-`window.DB`" en toda la app.
+**Colección `roles/{email}`** (doc ID = correo en minúsculas) → `{ role: 'dueño'|'editor'|'lector' }`.
+Cualquier cuenta logueada puede leer (`DB.getRole`/`DB.listRoles`). Un **dueño** puede además crear/
+actualizar/borrar roles desde la vista "Usuarios" (`DB.setRole`/`DB.deleteRole`), pero las reglas de
+Firestore (`allow create, update: if isOwner() && request.resource.data.role in ['editor','lector']`)
+solo dejan asignar 'editor' o 'lector' — nunca 'dueño', para que nadie pueda crear un segundo dueño
+por error o de forma casual, ni siquiera el propio dueño saltándose la UI. El primer dueño se crea a
+mano en la consola de Firebase o por Firebase CLI directamente sobre Firestore — es la única
+excepción a "todo pasa por `window.DB`" en toda la app.
 
 **`firebase.json` usa el formato de array multi-base** (`"firestore": [{ "database": "...", "rules":
 "...", "indexes": "..." }]`), necesario porque el proyecto tiene más de una base de datos. Ojo con un
@@ -114,8 +130,9 @@ nada) en proyectos con config multi-base — hay que usar `firebase deploy --onl
 `:rules`) para que realmente suba las reglas.
 
 **Modo local** (sin `FIREBASE_CONFIG`) no tiene login ni roles: `DB.getRole()` del backend local
-siempre devuelve `'admin'`, porque quien abre el navegador ya es dueño de sus propios datos en
-`localStorage` — no tiene sentido pedirle login a sí mismo.
+siempre devuelve `'dueño'`, porque quien abre el navegador ya es dueño de sus propios datos en
+`localStorage` — no tiene sentido pedirle login a sí mismo. `DB.listRoles()` devuelve `[]` y
+`setRole`/`deleteRole` son no-op: el concepto de "otros usuarios" no aplica en modo local.
 
 ## Formato de Excel esperado (confirmado con archivo real de ejemplo)
 

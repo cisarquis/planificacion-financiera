@@ -15,22 +15,28 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/roles/$(request.auth.token.email)).data.role;
     }
     function hasRole() {
-      return isSignedIn() && myRole() in ['admin', 'lector'];
+      return isSignedIn() && myRole() in ['editor', 'lector', 'dueño'];
     }
     function isAdmin() {
-      return isSignedIn() && myRole() == 'admin';
+      return isSignedIn() && myRole() in ['editor', 'dueño'];
+    }
+    function isOwner() {
+      return isSignedIn() && myRole() == 'dueño';
     }
 
     // roles/*: cualquier cuenta @ingevec.cl logueada puede leer su propio rol (y el de
-    // otros, no hay dato sensible ahí); nadie puede escribir desde la app — se administra
-    // a mano por consola/CLI para evitar que alguien se autoasigne "admin". Deliberadamente
-    // NO se usa un wildcard genérico tipo /{collection}/{docId} para el resto de las
-    // colecciones: en reglas de Firestore, un match más específico (como este) NO gana por
-    // sobre uno genérico que también calce el mismo path — se evalúan todos y basta que uno
-    // permita para que se permita. Listar las colecciones a mano evita ese solapamiento.
+    // otros, no hay dato sensible ahí). El dueño puede crear/actualizar roles desde la
+    // pantalla "Usuarios" de la app, pero solo puede asignar 'editor' o 'lector' — nunca
+    // 'dueño', que sigue siendo exclusivamente un paso manual por consola/CLI para evitar
+    // que se cree un segundo dueño por error o de forma casual. Deliberadamente NO se usa
+    // un wildcard genérico tipo /{collection}/{docId} para el resto de las colecciones: en
+    // reglas de Firestore, un match más específico (como este) NO gana por sobre uno
+    // genérico que también calce el mismo path — se evalúan todos y basta que uno permita
+    // para que se permita. Listar las colecciones a mano evita ese solapamiento.
     match /roles/{email} {
       allow read: if isSignedIn();
-      allow write: if false;
+      allow create, update: if isOwner() && request.resource.data.role in ['editor', 'lector'];
+      allow delete: if isOwner();
     }
 
     match /categorias/{id} {

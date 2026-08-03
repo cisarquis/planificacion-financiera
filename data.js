@@ -128,11 +128,16 @@
       return this._get('importLog', []);
     },
 
-    // Modo local no tiene login: quien abre el navegador ya es dueño de sus
-    // propios datos, así que actúa siempre como admin.
+    // Modo local no tiene login: quien abre el navegador ya es dueño de sus propios datos.
     async getRole() {
-      return 'admin';
+      return 'dueño';
     },
+    // Sin concepto de "otros usuarios" en modo local — no aplica.
+    async listRoles() {
+      return [];
+    },
+    async setRole() {},
+    async deleteRole() {},
   };
 
   // ----------------------------------------------------------------------
@@ -228,13 +233,27 @@
       return qs.docs.map((d) => Object.assign({ id: d.id }, d.data()));
     },
 
-    // Rol de un correo (admin/lector), o null si no tiene documento asignado.
-    // Solo lectura desde la app — el documento se crea/edita por consola o CLI,
-    // nunca por las reglas de Firestore (ver AGENTS.md).
+    // Rol de un correo (dueño/editor/lector), o null si no tiene documento asignado.
     async getRole(email) {
       const { doc, getDoc } = this.fb;
       const snap = await getDoc(doc(this.db, 'roles', (email || '').toLowerCase()));
       return snap.exists() ? snap.data().role : null;
+    },
+    // Solo el dueño puede llamar a estos 3 en la práctica (las reglas de Firestore lo exigen);
+    // setRole además solo acepta 'editor'/'lector' — asignar "dueño" queda fuera de la app
+    // a propósito (ver firestore.rules y AGENTS.md).
+    async listRoles() {
+      const { collection, getDocs } = this.fb;
+      const qs = await getDocs(collection(this.db, 'roles'));
+      return qs.docs.map((d) => Object.assign({ email: d.id }, d.data()));
+    },
+    async setRole(email, role) {
+      const { doc, setDoc, serverTimestamp } = this.fb;
+      await setDoc(doc(this.db, 'roles', (email || '').toLowerCase()), { role, updatedAt: serverTimestamp() });
+    },
+    async deleteRole(email) {
+      const { doc, deleteDoc } = this.fb;
+      await deleteDoc(doc(this.db, 'roles', (email || '').toLowerCase()));
     },
   };
 
@@ -282,7 +301,7 @@
     'listProyectos', 'getProyecto', 'addProyecto', 'updateProyecto', 'deleteProyecto',
     'getCajaReal', 'setCajaRealMes',
     'addImportLog', 'listImportLog',
-    'getRole',
+    'getRole', 'listRoles', 'setRole', 'deleteRole',
   ];
   METHODS.forEach((m) => {
     DB[m] = function (...args) { return this.backend[m](...args); };

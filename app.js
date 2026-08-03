@@ -235,12 +235,14 @@
       dashboard: 'Consolidado', 'categorias-view': 'Por categoría', 'flujo-mensual': 'Flujo de Caja',
       'resumen-directorio': 'Resumen Directorio', proyectos: 'Por proyecto', importar: 'Importar Excel',
       caja: 'Caja del banco', pagos: 'Programar pagos', reportes: 'Reportes', config: 'Configuración',
+      usuarios: 'Usuarios',
     };
     document.getElementById('view-title').textContent = titles[id] || '';
     const renders = {
       dashboard: renderDashboard, 'categorias-view': renderCategoriasView, 'flujo-mensual': renderFlujoMensual,
       'resumen-directorio': renderResumenDirectorio, proyectos: renderProyectos, importar: renderImportar,
       caja: renderCaja, pagos: renderPagos, reportes: renderReportes, config: renderConfig,
+      usuarios: renderUsuarios,
     };
     if (renders[id]) renders[id]();
   }
@@ -559,6 +561,13 @@
     return `<td class="num ${cls}">${PF.fmtNum(v)}</td>`;
   }
 
+  // Fuera de las filas de proyecto: no se editan (son sumas calculadas, no datos propios).
+  let flujoEditMode = false;
+  function flujoProjCell(v, projId, mes) {
+    if (!flujoEditMode) return flujoCell(v);
+    return `<td class="num p-1"><input type="number" step="any" class="form-control form-control-sm num flujo-edit-input" data-proj-id="${projId}" data-mes="${mes}" value="${v}"></td>`;
+  }
+
   function renderFlujoMensual() {
     const el = document.getElementById('flujo-mensual');
     if (!state.proyectos.length) { el.innerHTML = emptyState('Sin datos', 'Importa proyectos para ver el flujo de caja mensual.'); return; }
@@ -589,7 +598,7 @@
         const projArr = months.map((m) => (p.proyeccion || {})[m] || 0);
         rows += `<tr class="proj-row">
           <td class="proj-col"><span class="row-label" style="padding-left:14px"><i class="bi bi-dot"></i><span>${PF.esc(p.nombre)}</span></span></td>
-          ${projArr.map(flujoCell).join('')}
+          ${months.map((m, i) => flujoProjCell(projArr[i], p.id, m)).join('')}
           <td class="trend-col">${PFCharts.sparkline(projArr)}</td>
         </tr>`;
       });
@@ -629,10 +638,12 @@
           <span>${mesesBajoUmbral} meses <b>bajo umbral</b></span>
         </div>
         <div class="flujo-actions">
+          ${isAdmin() ? `<button class="flujo-btn ${flujoEditMode ? 'active' : ''}" id="flujo-edit-toggle"><i class="bi bi-pencil-square"></i> ${flujoEditMode ? 'Salir de edición' : 'Editar flujo'}</button>` : ''}
           <button class="flujo-btn" id="flujo-excel"><i class="bi bi-file-earmark-excel" style="color:#15803d"></i> Exportar Excel</button>
           <button class="flujo-btn" id="flujo-pdf"><i class="bi bi-filetype-pdf" style="color:#b91c1c"></i> PDF directorio</button>
         </div>
       </div>
+      ${flujoEditMode ? '<div class="alert alert-primary py-2 px-3 mb-3 small"><i class="bi bi-info-circle me-1"></i>Modo edición: cambia un valor y presiona Tab/Enter o haz clic afuera para guardarlo.</div>' : ''}
       <div class="panel mb-0">
         <h3>Flujo de caja mensual por proyecto</h3>
         <p class="panel-hint">Haz clic en una categoría para expandir sus proyectos. Rojo = aporte, verde = devolución.</p>
@@ -677,6 +688,34 @@
       return out;
     }
 
+    if (isAdmin()) {
+      el.querySelector('#flujo-edit-toggle').addEventListener('click', () => {
+        flujoEditMode = !flujoEditMode;
+        renderFlujoMensual();
+      });
+      el.querySelectorAll('.flujo-edit-input').forEach((inp) => {
+        inp.addEventListener('change', async () => {
+          const projId = inp.dataset.projId, mes = inp.dataset.mes;
+          const p = state.proyectos.find((x) => x.id === projId);
+          if (!p) return;
+          const val = Number(inp.value) || 0;
+          const merged = Object.assign({}, p.proyeccion, { [mes]: val });
+          inp.disabled = true;
+          try {
+            // Actualiza el proyecto en memoria en vez de recargar los 170 desde Firestore —
+            // con una grilla editable celda por celda, un loadAll() completo por cada edición
+            // sería mucho más lento de lo necesario.
+            const updated = await DB.updateProyecto(projId, { proyeccion: merged });
+            if (updated) Object.assign(p, updated);
+            renderFlujoMensual();
+          } catch (err) {
+            console.error(err);
+            toast('No se pudo guardar: ' + err.message, 'danger');
+            inp.disabled = false;
+          }
+        });
+      });
+    }
     el.querySelector('#flujo-excel').addEventListener('click', () => {
       PFReports.exportExcel('flujo_de_caja_mensual.xlsx', 'Flujo de Caja', buildExportRows((v) => v));
     });
@@ -1991,6 +2030,13 @@
         <h6>Exportar por proyecto</h6>
         <p class="text-muted small">Un archivo Excel con una hoja por proyecto.</p>
         <button class="btn btn-outline-success" id="rep-proj-excel"><i class="bi bi-file-earmark-excel"></i> Excel por proyecto</button>
+      </div>
+      <div class="panel">
+        <h6>Exportar como archivo maestro</h6>
+        <p class="text-muted small">Mismo formato que se importa (una hoja por categoría, una fila por proyecto, meses en
+          columnas) — incluye cualquier edición manual del flujo. Sirve para reemplazar el Excel maestro con los datos
+          actuales de la app.</p>
+        <button class="btn btn-outline-success" id="rep-master-excel"><i class="bi bi-file-earmark-excel"></i> Excel (formato maestro)</button>
       </div>`;
 
     el.querySelector('#rep-excel').addEventListener('click', () => {
@@ -2026,6 +2072,18 @@
       });
       if (!sheets.length) { toast('No hay proyectos', 'warning'); return; }
       PFReports.exportExcelMulti('flujo_por_proyecto.xlsx', sheets);
+    });
+    el.querySelector('#rep-master-excel').addEventListener('click', () => {
+      const months = allMonths();
+      const header = ['', 'Tipo', ...months.map(PF.monthLabel)];
+      const sheets = state.categorias.map((cat) => {
+        const proys = state.proyectos.filter((p) => p.categoriaId === cat.id);
+        const aoa = [header];
+        proys.forEach((p) => aoa.push([p.nombre, p.tipo || '', ...months.map((m) => (p.proyeccion || {})[m] || 0)]));
+        return { name: cat.nombre, aoa };
+      }).filter((s) => s.aoa.length > 1);
+      if (!sheets.length) { toast('No hay proyectos', 'warning'); return; }
+      PFReports.exportExcelMulti('flujo_maestro.xlsx', sheets);
     });
   }
 
@@ -2129,6 +2187,58 @@
     });
   }
 
+  // ------------------------------------------------------------------ Vista: Usuarios
+  // Solo dueño: administra quién es editor/lector desde la app. Promover a "dueño" no está
+  // disponible acá a propósito (ver firestore.rules) — se hace a mano en la consola de Firebase.
+  async function renderUsuarios() {
+    const el = document.getElementById('usuarios');
+    if (!isOwner()) {
+      el.innerHTML = emptyState('Solo el dueño', 'Pídele al dueño de la cuenta que administre los usuarios.');
+      return;
+    }
+    el.innerHTML = `<div class="panel"><div class="text-muted small">Cargando usuarios…</div></div>`;
+    const roles = await DB.listRoles();
+    const rows = roles.map((r) => `<tr>
+      <td>${PF.esc(r.email)}</td>
+      <td><span class="badge text-bg-${r.role === 'dueño' ? 'warning' : r.role === 'editor' ? 'primary' : 'secondary'}">${PF.esc(r.role)}</span></td>
+      <td class="num" style="width:120px">${r.role === 'dueño' ? '' : `<button class="btn btn-sm btn-outline-danger user-del" data-email="${PF.esc(r.email)}"><i class="bi bi-trash"></i></button>`}</td>
+    </tr>`).join('') || '<tr><td colspan="3" class="text-muted small">Sin usuarios agregados todavía.</td></tr>';
+
+    el.innerHTML = `
+      <div class="panel">
+        <h6>Agregar usuario</h6>
+        <div class="row g-2 align-items-end">
+          <div class="col-md-6"><label class="form-label small">Correo (@ingevec.cl)</label>
+            <input type="email" class="form-control" id="user-email" placeholder="nombre@ingevec.cl"></div>
+          <div class="col-md-3"><label class="form-label small">Rol</label>
+            <select class="form-select" id="user-role">
+              <option value="editor">Editor</option>
+              <option value="lector">Lector</option>
+            </select></div>
+          <div class="col-md-3"><button class="btn btn-primary w-100" id="user-add">Agregar</button></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h6>Usuarios con acceso</h6>
+        <table class="table table-sm"><tbody>${rows}</tbody></table>
+      </div>`;
+
+    el.querySelector('#user-add').addEventListener('click', async () => {
+      const email = el.querySelector('#user-email').value.trim().toLowerCase();
+      const role = el.querySelector('#user-role').value;
+      if (!email.endsWith('@ingevec.cl')) { toast('El correo debe ser @ingevec.cl', 'warning'); return; }
+      await DB.setRole(email, role);
+      toast('Usuario agregado', 'success');
+      renderUsuarios();
+    });
+    el.querySelectorAll('.user-del').forEach((b) => b.addEventListener('click', async () => {
+      if (!confirm(`¿Quitar el acceso de ${b.dataset.email}?`)) return;
+      await DB.deleteRole(b.dataset.email);
+      toast('Usuario eliminado', 'danger');
+      renderUsuarios();
+    }));
+  }
+
   // ------------------------------------------------------------------ Helpers UI
   // Sin botón de acceso directo a Importar: esa vista solo se llega por el menú lateral,
   // a propósito (el usuario no quiere el atajo repetido en cada pantalla vacía).
@@ -2147,7 +2257,13 @@
   // rechazan (ver firestore.rules), así que la protección real no depende
   // de este helper.
   function isAdmin() {
-    return state.role === 'admin';
+    return state.role === 'editor' || state.role === 'dueño';
+  }
+  // Dueño: además de todo lo que puede un editor, administra quién es editor/lector desde la
+  // pantalla "Usuarios" — promover a alguien a "dueño" queda fuera de la app a propósito
+  // (ver firestore.rules), así que este rol nunca se asigna desde la UI.
+  function isOwner() {
+    return state.role === 'dueño';
   }
 
   function setupAuthUI() {
