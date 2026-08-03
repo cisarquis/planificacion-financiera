@@ -61,6 +61,28 @@
     setTimeout(() => el.remove(), 4000);
   }
 
+  // Desactiva el botón mientras `fn` corre (evita doble clic durante guardados largos —
+  // ej. importar 170 proyectos hace ~170 escrituras seguidas sin ningún indicador visual,
+  // así que un segundo clic mientras tanto dispara el guardado completo dos veces y duplica
+  // todo). Si `fn` navega a otra vista al terminar, el botón deja de existir y no hace falta
+  // reactivarlo; si lanza un error, se reactiva para poder reintentar.
+  function busyOnClick(btn, label, fn) {
+    btn.addEventListener('click', async () => {
+      if (btn.disabled) return;
+      const original = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>${PF.esc(label)}`;
+      try {
+        await fn();
+      } catch (e) {
+        console.error(e);
+        toast('No se pudo guardar: ' + e.message, 'danger');
+      } finally {
+        if (document.body.contains(btn)) { btn.disabled = false; btn.innerHTML = original; }
+      }
+    });
+  }
+
   // ------------------------------------------------------------------ Estado
   const state = {
     mode: 'local',
@@ -1472,7 +1494,7 @@
       importState.flowRows = Array.from(e.target.selectedOptions).map((o) => +o.value); updatePreview();
     });
     box.querySelector('#imp-invert').addEventListener('change', (e) => { importState.invert = e.target.checked; updatePreview(); });
-    box.querySelector('#imp-save').addEventListener('click', saveImport);
+    busyOnClick(box.querySelector('#imp-save'), 'Guardando...', saveImport);
 
     updatePreview();
   }
@@ -1696,7 +1718,7 @@
       </div>`;
 
     el.querySelector('#mst-back').addEventListener('click', renderMasterMapping);
-    el.querySelector('#mst-import').addEventListener('click', () => saveMasterImport(items));
+    busyOnClick(el.querySelector('#mst-import'), 'Guardando...', () => saveMasterImport(items));
   }
 
   async function saveMasterImport(items) {
@@ -1814,7 +1836,7 @@
     el.querySelectorAll('.ppt-cat').forEach((sel) => sel.addEventListener('change', (e) => {
       items[+e.target.dataset.idx].categoriaId = e.target.value;
     }));
-    el.querySelector('#ppt-import').addEventListener('click', () => savePresupuestoImport(items));
+    busyOnClick(el.querySelector('#ppt-import'), 'Guardando...', () => savePresupuestoImport(items));
   }
 
   async function savePresupuestoImport(items) {
