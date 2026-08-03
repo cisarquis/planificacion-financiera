@@ -2115,12 +2115,15 @@
       toast('Categorías restablecidas', 'success');
       renderConfig();
     });
-    el.querySelector('#btn-del-all-proj').addEventListener('click', async () => {
+    busyOnClick(el.querySelector('#btn-del-all-proj'), 'Borrando...', async () => {
       const total = state.proyectos.length;
       if (!total) { toast('No hay proyectos que borrar', 'warning'); return; }
       const escrito = prompt(`Esto borra los ${total} proyecto(s) sin poder deshacerlo. Escribe BORRAR para confirmar.`);
       if (escrito !== 'BORRAR') return;
-      for (const p of state.proyectos) await DB.deleteProyecto(p.id);
+      // En paralelo, no uno por uno: con 340 proyectos, borrarlos secuencialmente se sentía
+      // lentísimo (una espera de red por cada uno); Firestore no tiene problema con muchas
+      // escrituras concurrentes.
+      await Promise.all(state.proyectos.map((p) => DB.deleteProyecto(p.id)));
       await loadAll();
       toast(`${total} proyecto(s) borrados`, 'danger');
       renderConfig();
