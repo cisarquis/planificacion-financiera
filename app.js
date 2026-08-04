@@ -563,6 +563,10 @@
 
   // Fuera de las filas de proyecto: no se editan (son sumas calculadas, no datos propios).
   let flujoEditMode = false;
+  // Celda a reenfocar después de un re-render disparado por guardar una edición (el guardado es
+  // async y renderFlujoMensual() reconstruye toda la tabla, así que el foco se perdería si no se
+  // restaura a mano) — {projId, mes} o null.
+  let flujoFocusTarget = null;
   function flujoProjCell(v, projId, mes) {
     if (!flujoEditMode) return flujoCell(v);
     return `<td class="num p-1"><input type="number" step="any" class="form-control form-control-sm num flujo-edit-input" data-proj-id="${projId}" data-mes="${mes}" value="${v}"></td>`;
@@ -643,7 +647,7 @@
           <button class="flujo-btn" id="flujo-pdf"><i class="bi bi-filetype-pdf" style="color:#b91c1c"></i> PDF directorio</button>
         </div>
       </div>
-      ${flujoEditMode ? '<div class="alert alert-primary py-2 px-3 mb-3 small"><i class="bi bi-info-circle me-1"></i>Modo edición: cambia un valor y presiona Tab/Enter o haz clic afuera para guardarlo.</div>' : ''}
+      ${flujoEditMode ? '<div class="alert alert-primary py-2 px-3 mb-3 small"><i class="bi bi-info-circle me-1"></i>Modo edición: escribe un valor y usa las flechas o Enter para moverte y guardar, como en Excel.</div>' : ''}
       <div class="panel mb-0">
         <h3>Flujo de caja mensual por proyecto</h3>
         <p class="panel-hint">Haz clic en una categoría para expandir sus proyectos. Rojo = aporte, verde = devolución.</p>
@@ -659,6 +663,13 @@
           <span class="flujo-legend-item"><span class="swatch" style="background:#dcfce7; border-color:#bbf7d0"></span>Caja holgada</span>
         </div>
       </div>`;
+
+    if (flujoFocusTarget) {
+      const t = flujoFocusTarget;
+      flujoFocusTarget = null;
+      const inp = el.querySelector(`.flujo-edit-input[data-proj-id="${CSS.escape(t.projId)}"][data-mes="${CSS.escape(t.mes)}"]`);
+      if (inp) { inp.focus(); inp.select(); }
+    }
 
     el.querySelectorAll('.cat-row').forEach((row) => {
       const toggle = () => {
@@ -691,9 +702,45 @@
     if (isAdmin()) {
       el.querySelector('#flujo-edit-toggle').addEventListener('click', () => {
         flujoEditMode = !flujoEditMode;
+        flujoFocusTarget = null;
         renderFlujoMensual();
       });
+      // Navegación tipo Excel entre celdas editables: flechas mueven el foco (y de paso
+      // confirman el valor de la celda que se abandona, porque enfocar otro input dispara el
+      // blur/'change' del anterior); Enter se comporta como flecha abajo. Al llegar al borde de
+      // una fila de proyecto sigue buscando en las filas de arriba/abajo saltándose las de
+      // categoría/total/acumulado/caja real, que no tienen input.
+      function findEditInput(row, colIndex) {
+        const cell = row && row.children[colIndex];
+        return cell && cell.querySelector ? cell.querySelector('.flujo-edit-input') : null;
+      }
+      function focusInput(target) {
+        if (!target) return;
+        flujoFocusTarget = { projId: target.dataset.projId, mes: target.dataset.mes };
+        target.focus();
+        target.select();
+      }
       el.querySelectorAll('.flujo-edit-input').forEach((inp) => {
+        inp.addEventListener('keydown', (e) => {
+          const td = inp.closest('td');
+          const tr = td.parentElement;
+          const colIndex = Array.prototype.indexOf.call(tr.children, td);
+          if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            let r = tr.previousElementSibling;
+            while (r) { const t2 = findEditInput(r, colIndex); if (t2) { focusInput(t2); break; } r = r.previousElementSibling; }
+          } else if (e.key === 'ArrowDown' || e.key === 'Enter') {
+            e.preventDefault();
+            let r = tr.nextElementSibling;
+            while (r) { const t2 = findEditInput(r, colIndex); if (t2) { focusInput(t2); break; } r = r.nextElementSibling; }
+          } else if (e.key === 'ArrowLeft' && inp.selectionStart === 0 && inp.selectionEnd === 0) {
+            e.preventDefault();
+            focusInput(findEditInput(tr, colIndex - 1));
+          } else if (e.key === 'ArrowRight' && inp.selectionStart === inp.value.length && inp.selectionEnd === inp.value.length) {
+            e.preventDefault();
+            focusInput(findEditInput(tr, colIndex + 1));
+          }
+        });
         inp.addEventListener('change', async () => {
           const projId = inp.dataset.projId, mes = inp.dataset.mes;
           const p = state.proyectos.find((x) => x.id === projId);
