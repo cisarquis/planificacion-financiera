@@ -563,13 +563,54 @@
 
   // Fuera de las filas de proyecto: no se editan (son sumas calculadas, no datos propios).
   let flujoEditMode = false;
-  // Celda a reenfocar después de un re-render disparado por guardar una edición (el guardado es
-  // async y renderFlujoMensual() reconstruye toda la tabla, así que el foco se perdería si no se
-  // restaura a mano) — {projId, mes} o null.
+  // Celda a reenfocar después de un re-render disparado por una edición (renderFlujoMensual()
+  // reconstruye toda la tabla, así que el foco se perdería si no se restaura a mano) — {projId,
+  // mes} o null.
   let flujoFocusTarget = null;
+  // Mientras se edita, los cambios NO se mandan a Firestore de inmediato: se acumulan en memoria
+  // (ya aplicados a state.proyectos, para que el resto de la vista —totales, acumulado— se vea
+  // actualizado en vivo) y solo se persisten al presionar "Guardar cambios". flujoEditSnapshot
+  // guarda el valor original de cada proyecto tocado para poder revertir con "Cancelar" o
+  // "Deshacer". flujoUndo/flujoRedo son pilas de {projId, mes, oldVal, newVal} para Ctrl+Z/Ctrl+Y.
+  // flujoDirty son los IDs de proyecto con al menos un cambio pendiente de guardar.
+  let flujoEditSnapshot = null;
+  let flujoUndo = [];
+  let flujoRedo = [];
+  let flujoDirty = new Set();
+
+  function flujoApplyEdit(projId, mes, val, { history = true } = {}) {
+    const p = state.proyectos.find((x) => x.id === projId);
+    if (!p) return;
+    const oldVal = (p.proyeccion || {})[mes] || 0;
+    if (oldVal === val) return;
+    p.proyeccion = Object.assign({}, p.proyeccion, { [mes]: val });
+    flujoDirty.add(projId);
+    if (history) {
+      flujoUndo.push({ projId, mes, oldVal, newVal: val });
+      flujoRedo = [];
+    }
+  }
+  function flujoUndoEdit() {
+    const a = flujoUndo.pop();
+    if (!a) return;
+    flujoApplyEdit(a.projId, a.mes, a.oldVal, { history: false });
+    flujoRedo.push(a);
+    flujoFocusTarget = { projId: a.projId, mes: a.mes };
+    renderFlujoMensual();
+  }
+  function flujoRedoEdit() {
+    const a = flujoRedo.pop();
+    if (!a) return;
+    flujoApplyEdit(a.projId, a.mes, a.newVal, { history: false });
+    flujoUndo.push(a);
+    flujoFocusTarget = { projId: a.projId, mes: a.mes };
+    renderFlujoMensual();
+  }
   function flujoProjCell(v, projId, mes) {
     if (!flujoEditMode) return flujoCell(v);
-    return `<td class="num p-1"><input type="number" step="any" class="form-control form-control-sm num flujo-edit-input" data-proj-id="${projId}" data-mes="${mes}" value="${v}"></td>`;
+    const orig = flujoEditSnapshot && flujoEditSnapshot.has(projId) ? (flujoEditSnapshot.get(projId)[mes] || 0) : v;
+    const dirty = orig !== v;
+    return `<td class="num p-1"><input type="number" step="any" class="form-control form-control-sm num flujo-edit-input${dirty ? ' dirty' : ''}" data-proj-id="${projId}" data-mes="${mes}" value="${v}"></td>`;
   }
 
   function renderFlujoMensual() {
@@ -642,12 +683,17 @@
           <span>${mesesBajoUmbral} meses <b>bajo umbral</b></span>
         </div>
         <div class="flujo-actions">
-          ${isAdmin() ? `<button class="flujo-btn ${flujoEditMode ? 'active' : ''}" id="flujo-edit-toggle"><i class="bi bi-pencil-square"></i> ${flujoEditMode ? 'Salir de edición' : 'Editar flujo'}</button>` : ''}
+          ${isAdmin() ? (flujoEditMode ? `
+            <button class="flujo-btn" id="flujo-undo" ${flujoUndo.length ? '' : 'disabled'} title="Deshacer (Ctrl+Z)"><i class="bi bi-arrow-counterclockwise"></i> Deshacer</button>
+            <button class="flujo-btn" id="flujo-redo" ${flujoRedo.length ? '' : 'disabled'} title="Rehacer (Ctrl+Y)"><i class="bi bi-arrow-clockwise"></i> Rehacer</button>
+            <button class="flujo-btn" id="flujo-cancel"><i class="bi bi-x-lg"></i> Cancelar</button>
+            <button class="flujo-btn active" id="flujo-save" ${flujoDirty.size ? '' : 'disabled'}><i class="bi bi-check-lg"></i> Guardar cambios${flujoDirty.size ? ` (${flujoDirty.size})` : ''}</button>
+          ` : `<button class="flujo-btn" id="flujo-edit-toggle"><i class="bi bi-pencil-square"></i> Editar flujo</button>`) : ''}
           <button class="flujo-btn" id="flujo-excel"><i class="bi bi-file-earmark-excel" style="color:#15803d"></i> Exportar Excel</button>
           <button class="flujo-btn" id="flujo-pdf"><i class="bi bi-filetype-pdf" style="color:#b91c1c"></i> PDF directorio</button>
         </div>
       </div>
-      ${flujoEditMode ? '<div class="alert alert-primary py-2 px-3 mb-3 small"><i class="bi bi-info-circle me-1"></i>Modo edición: escribe un valor y usa las flechas o Enter para moverte y guardar, como en Excel.</div>' : ''}
+      ${flujoEditMode ? '<div class="alert alert-primary py-2 px-3 mb-3 small"><i class="bi bi-info-circle me-1"></i>Modo edición: escribe un valor y usa las flechas o Enter para moverte, como en Excel. Los cambios quedan pendientes hasta que presiones "Guardar cambios".</div>' : ''}
       <div class="panel mb-0">
         <h3>Flujo de caja mensual por proyecto</h3>
         <p class="panel-hint">Haz clic en una categoría para expandir sus proyectos. Rojo = aporte, verde = devolución.</p>
@@ -700,16 +746,48 @@
     }
 
     if (isAdmin()) {
-      el.querySelector('#flujo-edit-toggle').addEventListener('click', () => {
-        flujoEditMode = !flujoEditMode;
-        flujoFocusTarget = null;
-        renderFlujoMensual();
-      });
+      if (!flujoEditMode) {
+        el.querySelector('#flujo-edit-toggle').addEventListener('click', () => {
+          flujoEditMode = true;
+          flujoFocusTarget = null;
+          flujoUndo = []; flujoRedo = []; flujoDirty = new Set();
+          flujoEditSnapshot = new Map(state.proyectos.map((p) => [p.id, Object.assign({}, p.proyeccion)]));
+          renderFlujoMensual();
+        });
+      } else {
+        el.querySelector('#flujo-undo').addEventListener('click', flujoUndoEdit);
+        el.querySelector('#flujo-redo').addEventListener('click', flujoRedoEdit);
+        el.querySelector('#flujo-cancel').addEventListener('click', () => {
+          if (flujoDirty.size && !confirm('¿Descartar los cambios sin guardar?')) return;
+          if (flujoEditSnapshot) {
+            state.proyectos.forEach((p) => { if (flujoEditSnapshot.has(p.id)) p.proyeccion = flujoEditSnapshot.get(p.id); });
+          }
+          flujoEditMode = false; flujoEditSnapshot = null; flujoUndo = []; flujoRedo = []; flujoDirty = new Set(); flujoFocusTarget = null;
+          renderFlujoMensual();
+        });
+        busyOnClick(el.querySelector('#flujo-save'), 'Guardando...', async () => {
+          if (!flujoDirty.size) return;
+          const ids = Array.from(flujoDirty);
+          // En paralelo: mismo criterio que el borrado masivo, no hay razón para esperar una
+          // escritura antes de lanzar la siguiente.
+          await Promise.all(ids.map(async (id) => {
+            const p = state.proyectos.find((x) => x.id === id);
+            if (!p) return;
+            const updated = await DB.updateProyecto(id, { proyeccion: p.proyeccion });
+            if (updated) Object.assign(p, updated);
+          }));
+          flujoEditMode = false; flujoEditSnapshot = null; flujoUndo = []; flujoRedo = []; flujoDirty = new Set(); flujoFocusTarget = null;
+          toast('Cambios guardados', 'success');
+          renderFlujoMensual();
+        });
+      }
       // Navegación tipo Excel entre celdas editables: flechas mueven el foco (y de paso
       // confirman el valor de la celda que se abandona, porque enfocar otro input dispara el
       // blur/'change' del anterior); Enter se comporta como flecha abajo. Al llegar al borde de
       // una fila de proyecto sigue buscando en las filas de arriba/abajo saltándose las de
-      // categoría/total/acumulado/caja real, que no tienen input.
+      // categoría/total/acumulado/caja real, que no tienen input. Ctrl+Z/Ctrl+Y deshacen/rehacen
+      // el historial de ediciones en vez del undo nativo del input (que se anula con
+      // preventDefault) — el guardado real a Firestore solo ocurre al presionar "Guardar cambios".
       function findEditInput(row, colIndex) {
         const cell = row && row.children[colIndex];
         return cell && cell.querySelector ? cell.querySelector('.flujo-edit-input') : null;
@@ -722,6 +800,9 @@
       }
       el.querySelectorAll('.flujo-edit-input').forEach((inp) => {
         inp.addEventListener('keydown', (e) => {
+          const key = e.key.toLowerCase();
+          if ((e.ctrlKey || e.metaKey) && !e.shiftKey && key === 'z') { e.preventDefault(); flujoUndoEdit(); return; }
+          if ((e.ctrlKey || e.metaKey) && (key === 'y' || (e.shiftKey && key === 'z'))) { e.preventDefault(); flujoRedoEdit(); return; }
           const td = inp.closest('td');
           const tr = td.parentElement;
           const colIndex = Array.prototype.indexOf.call(tr.children, td);
@@ -741,25 +822,10 @@
             focusInput(findEditInput(tr, colIndex + 1));
           }
         });
-        inp.addEventListener('change', async () => {
-          const projId = inp.dataset.projId, mes = inp.dataset.mes;
-          const p = state.proyectos.find((x) => x.id === projId);
-          if (!p) return;
+        inp.addEventListener('change', () => {
           const val = Number(inp.value) || 0;
-          const merged = Object.assign({}, p.proyeccion, { [mes]: val });
-          inp.disabled = true;
-          try {
-            // Actualiza el proyecto en memoria en vez de recargar los 170 desde Firestore —
-            // con una grilla editable celda por celda, un loadAll() completo por cada edición
-            // sería mucho más lento de lo necesario.
-            const updated = await DB.updateProyecto(projId, { proyeccion: merged });
-            if (updated) Object.assign(p, updated);
-            renderFlujoMensual();
-          } catch (err) {
-            console.error(err);
-            toast('No se pudo guardar: ' + err.message, 'danger');
-            inp.disabled = false;
-          }
+          flujoApplyEdit(inp.dataset.projId, inp.dataset.mes, val);
+          renderFlujoMensual();
         });
       });
     }

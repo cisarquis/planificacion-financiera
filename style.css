@@ -284,6 +284,9 @@ body {
   box-shadow: 0 0 0 2px var(--pf-primary-100);
   outline: none;
 }
+.flujo-edit-input.dirty { border-color: var(--pf-warning-500); background: var(--pf-warning-100); }
+.flujo-edit-input.dirty:focus { background: #fff; box-shadow: 0 0 0 2px var(--pf-warning-300); }
+.flujo-btn:disabled { opacity: .5; cursor: not-allowed; }
 .flujo-table td.proj-col { padding: 10px 14px; border-right: 1px solid var(--pf-border); }
 .flujo-table .row-label { display: inline-flex; align-items: center; gap: 7px; }
 .flujo-table .row-label i { font-size: 11px; color: var(--pf-slate-400); width: 11px; }

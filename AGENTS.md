@@ -88,12 +88,19 @@ Login obligatorio (Google, `signInWithPopup` + `GoogleAuthProvider`, restringido
 
 **Editar el flujo de caja a mano**: en "Flujo de Caja mensual", un editor/dueño puede activar "Editar
 flujo" — las celdas de las filas de proyecto pasan a `<input type="number">`; las filas de categoría/
-total/acumulado/caja real siguen de solo lectura (son sumas calculadas). Cada cambio hace
-`DB.updateProyecto(id, { proyeccion: {...} })` y actualiza `state.proyectos` en memoria (sin recargar
-los ~170+ proyectos completos) antes de volver a pintar la vista. Como "Exportar por proyecto" y el
-nuevo botón **"Exportar como archivo maestro"** (en Reportes, mismo layout que el importador: una hoja
-por categoría, una fila por proyecto) leen esa misma estructura en vivo, cualquier edición manual ya
-queda reflejada al exportar sin lógica extra de reconciliación.
+total/acumulado/caja real siguen de solo lectura (son sumas calculadas). Navegación tipo Excel: las
+flechas mueven el foco entre celdas (saltándose filas no editables al subir/bajar) y Enter se
+comporta como flecha abajo. Los cambios **no se guardan en Firestore al vuelo**: se acumulan en
+memoria sobre `state.proyectos` (para que totales/acumulado se vean actualizados en vivo) hasta que
+se presiona **"Guardar cambios"** (ahí sí, un `DB.updateProyecto(id, { proyeccion })` por proyecto
+tocado, en paralelo) o **"Cancelar"** (revierte todo a como estaba al entrar en modo edición). Ctrl+Z/
+Ctrl+Y (o los botones "Deshacer"/"Rehacer") navegan una pila de cambios celda por celda
+(`flujoUndo`/`flujoRedo` en `app.js`) independiente del guardado — deshacer/rehacer no habla con
+Firestore, solo mueve el valor en memoria. Las celdas con un cambio sin guardar se resaltan en
+ámbar (clase `.dirty`). Como "Exportar por proyecto" y el botón **"Exportar como archivo maestro"**
+(en Reportes, mismo layout que el importador: una hoja por categoría, una fila por proyecto) leen esa
+misma estructura en vivo, cualquier edición manual —guardada o todavía pendiente— ya queda reflejada
+al exportar sin lógica extra de reconciliación.
 
 **Por qué comparte proyecto de Firebase con Mira pero no la base de datos**: se evaluó un proyecto
 Firebase 100% aparte, pero la cuenta de Google del usuario (`csarquis@ingevec.cl`) pertenece a la
