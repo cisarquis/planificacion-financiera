@@ -1573,11 +1573,88 @@
   }
 
   // ------------------------------------------------------- Vista: Por proyecto
+  const OPEN_PROJ_GRUPOS_KEY = 'pf.proyectos.openGrupos';
+
+  // Meses/Neto/Aportes/Margen a partir de una proyección — se usa tanto para un proyecto normal
+  // como para el neto combinado de un grupo (ver mergeProyeccion), así el cálculo es siempre el
+  // mismo sin importar si son datos de un solo proyecto o de varios sumados mes a mes.
+  function flowStats(proyeccion) {
+    const months = Object.keys(proyeccion || {}).sort();
+    const vals = Object.values(proyeccion || {});
+    const total = vals.reduce((a, b) => a + b, 0);
+    const aportes = Math.abs(vals.filter((v) => v < 0).reduce((a, b) => a + b, 0));
+    const margen = aportes ? (total / aportes) * 100 : null;
+    return { months, total, aportes, margen };
+  }
+  function statsRowsHtml(stats, moneda) {
+    return `<div class="small">Meses: ${stats.months.length}</div>
+      <div class="small ${stats.total < 0 ? 'neg' : 'pos'}">Neto: ${PF.fmtMoney(stats.total, moneda)}</div>
+      <div class="small neg">Aportes: ${PF.fmtMoney(stats.aportes, moneda)}</div>
+      <div class="small ${stats.margen == null ? 'text-muted' : (stats.margen < 0 ? 'neg' : 'pos')}">Margen: ${stats.margen == null ? '—' : PF.fmtNum(stats.margen) + '%'}</div>`;
+  }
+  // Suma mes a mes las proyecciones de varios proyectos — para el neto/aportes/margen combinado
+  // de un grupo se necesita el flujo neteado por mes (no la suma de los stats de cada hijo por
+  // separado), porque un mes donde un hijo aporta y el otro devuelve debe netearse igual que
+  // pasaría si fuera un solo proyecto real.
+  function mergeProyeccion(proyectos) {
+    const merged = {};
+    proyectos.forEach((p) => {
+      Object.entries(p.proyeccion || {}).forEach(([m, v]) => { merged[m] = (merged[m] || 0) + v; });
+    });
+    return merged;
+  }
+
+  function proyectoCard(p) {
+    return `<div class="col-md-4 col-lg-3">
+      <div class="panel mb-0" style="cursor:pointer" data-proj="${p.id}">
+        <div class="fw-semibold text-truncate">${PF.esc(p.nombre)}</div>
+        <div class="text-muted small mb-2">${PF.esc(categoriaNombre(p.categoriaId))}${p.tipo ? ' · ' + PF.esc(p.tipo) : ''}</div>
+        ${statsRowsHtml(flowStats(p.proyeccion), p.moneda)}
+      </div></div>`;
+  }
+
+  // Tarjeta de un "grupo" (proyecto.grupoPadre): proyectos independientes que en la práctica son
+  // sub-obras de un mismo proyecto más grande (ej. "Icuadra Sn Bdo 3 y 4" agrupando "Jardines de
+  // San Bernardo I" y "II"). El agrupamiento es solo de la app — cada hijo sigue siendo un
+  // proyecto normal con su propio flujo real, así que no hay riesgo de doble conteo en
+  // categorías/Resumen Directorio/Flujo de Caja, que siguen viendo cada hijo por separado.
+  function grupoCard(nombre, children, isOpen) {
+    const stats = flowStats(mergeProyeccion(children));
+    const moneda = (children[0] && children[0].moneda) || state.config.moneda;
+    return `<div class="col-md-4 col-lg-3">
+      <div class="panel mb-0" style="cursor:pointer; border-color:var(--pf-primary-500)" data-grupo-toggle="${PF.esc(nombre)}">
+        <div class="d-flex align-items-center gap-1">
+          <i class="bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'} text-muted"></i>
+          <div class="fw-semibold text-truncate">${PF.esc(nombre)}</div>
+        </div>
+        <div class="text-muted small mb-2">${children.length} proyectos agrupados</div>
+        ${statsRowsHtml(stats, moneda)}
+      </div></div>`;
+  }
+
+  // Arma las tarjetas de una lista de proyectos, agrupando los que compartan grupoPadre en una
+  // sola tarjeta expandible en vez de mostrarlos sueltos.
+  function proyectosGridHtml(proys) {
+    const openGrupos = loadOpenMap(OPEN_PROJ_GRUPOS_KEY);
+    const seen = new Set();
+    return proys.map((p) => {
+      if (!p.grupoPadre) return proyectoCard(p);
+      if (seen.has(p.grupoPadre)) return '';
+      seen.add(p.grupoPadre);
+      const children = proys.filter((x) => x.grupoPadre === p.grupoPadre);
+      const isOpen = openGrupos[p.grupoPadre] === true;
+      const childrenHtml = isOpen
+        ? `<div class="col-12"><div class="row g-2 ps-4 pt-1">${children.map(proyectoCard).join('')}</div></div>`
+        : '';
+      return grupoCard(p.grupoPadre, children, isOpen) + childrenHtml;
+    }).join('');
+  }
+
   function renderProyectos() {
     const el = document.getElementById('proyectos');
     const porCat = state.categorias.map((cat) => {
       const proys = state.proyectos.filter((p) => p.categoriaId === cat.id);
-      const items = proys.map((p) => proyectoCard(p)).join('') || '<div class="text-muted small px-2">Sin proyectos</div>';
+      const items = proyectosGridHtml(proys) || '<div class="text-muted small px-2">Sin proyectos</div>';
       return `<div class="mb-3"><div class="fw-semibold mb-2">${PF.esc(cat.nombre)}
         <span class="text-muted small">(${proys.length})</span></div>
         <div class="row g-2">${items}</div></div>`;
@@ -1590,31 +1667,18 @@
       </div>
       ${porCat}
       ${sinCat.length ? `<div class="mb-3"><div class="fw-semibold mb-2 text-muted">Sin categoría</div>
-        <div class="row g-2">${sinCat.map(proyectoCard).join('')}</div></div>` : ''}
+        <div class="row g-2">${proyectosGridHtml(sinCat)}</div></div>` : ''}
       <div id="proj-detail"></div>`;
 
     if (isAdmin()) document.getElementById('btn-nuevo-proj').addEventListener('click', () => nuevoProyectoDialog());
     el.querySelectorAll('[data-proj]').forEach((c) => c.addEventListener('click', () => renderProyectoDetail(c.dataset.proj)));
-  }
-
-  function proyectoCard(p) {
-    const months = Object.keys(p.proyeccion || {}).sort();
-    const vals = Object.values(p.proyeccion || {});
-    const total = vals.reduce((a, b) => a + b, 0);
-    // Aportes = solo los meses de flujo negativo (lo que "pone" el proyecto), en positivo para
-    // mostrar. Margen = neto / aportes: qué porcentaje de lo aportado vuelve como neto — si no hay
-    // aportes (proyecto sin flujo negativo, ej. puro financiamiento) el margen no aplica ("—").
-    const aportes = Math.abs(vals.filter((v) => v < 0).reduce((a, b) => a + b, 0));
-    const margen = aportes ? (total / aportes) * 100 : null;
-    return `<div class="col-md-4 col-lg-3">
-      <div class="panel mb-0" style="cursor:pointer" data-proj="${p.id}">
-        <div class="fw-semibold text-truncate">${PF.esc(p.nombre)}</div>
-        <div class="text-muted small mb-2">${PF.esc(categoriaNombre(p.categoriaId))}${p.tipo ? ' · ' + PF.esc(p.tipo) : ''}</div>
-        <div class="small">Meses: ${months.length}</div>
-        <div class="small ${total < 0 ? 'neg' : 'pos'}">Neto: ${PF.fmtMoney(total, p.moneda)}</div>
-        <div class="small neg">Aportes: ${PF.fmtMoney(aportes, p.moneda)}</div>
-        <div class="small ${margen == null ? 'text-muted' : (margen < 0 ? 'neg' : 'pos')}">Margen: ${margen == null ? '—' : PF.fmtNum(margen) + '%'}</div>
-      </div></div>`;
+    el.querySelectorAll('[data-grupo-toggle]').forEach((c) => c.addEventListener('click', () => {
+      const nombre = c.dataset.grupoToggle;
+      const cur = loadOpenMap(OPEN_PROJ_GRUPOS_KEY);
+      cur[nombre] = !(cur[nombre] === true);
+      saveOpenMap(OPEN_PROJ_GRUPOS_KEY, cur);
+      renderProyectos();
+    }));
   }
 
   function renderProyectoDetail(id) {
@@ -1633,6 +1697,7 @@
             <h6 class="mb-1">${PF.esc(p.nombre)}</h6>
             <span class="text-muted small">${PF.esc(categoriaNombre(p.categoriaId))} · ${p.moneda || state.config.moneda}
             ${p.tipo ? '· ' + PF.esc(p.tipo) : ''}
+            ${p.grupoPadre ? '· grupo: ' + PF.esc(p.grupoPadre) : ''}
             ${p.ultimaImportacion ? '· última importación: ' + PF.esc(p.ultimaImportacion.fileName || '') : ''}</span>
           </div>
           <div>
@@ -1675,6 +1740,10 @@
     const isEdit = !!proj;
     const opts = state.categorias.map((c) =>
       `<option value="${c.id}" ${proj && proj.categoriaId === c.id ? 'selected' : ''}>${PF.esc(c.nombre)}</option>`).join('');
+    // Grupos existentes para el datalist, para que al agregar el segundo proyecto de un grupo
+    // ("Jardines de San Bernardo II") sea fácil escribir EXACTO el mismo nombre que el primero
+    // ("Icuadra Sn Bdo 3 y 4") — el agrupamiento en Por proyecto es por coincidencia exacta de texto.
+    const gruposExistentes = Array.from(new Set(state.proyectos.map((p) => p.grupoPadre).filter(Boolean))).sort();
     const html = `
       <div class="modal fade" tabindex="-1" id="proj-modal"><div class="modal-dialog"><div class="modal-content">
         <div class="modal-header"><h5 class="modal-title">${isEdit ? 'Editar' : 'Nuevo'} proyecto</h5>
@@ -1686,6 +1755,9 @@
             <select class="form-select" id="mp-cat">${opts}</select></div>
           <div class="mb-2"><label class="form-label small">Tipo <span class="text-muted">(opcional)</span></label>
             <input class="form-control" id="mp-tipo" value="${isEdit ? PF.esc(proj.tipo || '') : ''}" placeholder="Ej: DS19, Núcleos, Hoteles"></div>
+          <div class="mb-2"><label class="form-label small">Grupo <span class="text-muted">(opcional — para agrupar sub-proyectos, ej. "Icuadra Sn Bdo 3 y 4")</span></label>
+            <input class="form-control" id="mp-grupo" list="mp-grupo-list" value="${isEdit ? PF.esc(proj.grupoPadre || '') : ''}" placeholder="Nombre del grupo">
+            <datalist id="mp-grupo-list">${gruposExistentes.map((g) => `<option value="${PF.esc(g)}">`).join('')}</datalist></div>
           <div class="mb-2"><label class="form-label small">Moneda</label>
             <select class="form-select" id="mp-moneda">
               <option value="UF" ${!proj || proj.moneda === 'UF' ? 'selected' : ''}>UF</option>
@@ -1702,7 +1774,10 @@
     wrap.querySelector('#mp-save').addEventListener('click', async () => {
       const nombre = wrap.querySelector('#mp-nombre').value.trim();
       if (!nombre) { toast('Ingresa un nombre', 'warning'); return; }
-      const data = { nombre, categoriaId: wrap.querySelector('#mp-cat').value, moneda: wrap.querySelector('#mp-moneda').value, tipo: wrap.querySelector('#mp-tipo').value.trim() };
+      const data = {
+        nombre, categoriaId: wrap.querySelector('#mp-cat').value, moneda: wrap.querySelector('#mp-moneda').value,
+        tipo: wrap.querySelector('#mp-tipo').value.trim(), grupoPadre: wrap.querySelector('#mp-grupo').value.trim() || null,
+      };
       if (isEdit) await DB.updateProyecto(proj.id, data); else await DB.addProyecto(data);
       await loadAll(); modal.hide(); toast('Proyecto guardado', 'success'); renderProyectos();
     });

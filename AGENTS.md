@@ -149,6 +149,25 @@ siempre devuelve `'dueño'`, porque quien abre el navegador ya es dueño de sus 
 `localStorage` — no tiene sentido pedirle login a sí mismo. `DB.listRoles()` devuelve `[]` y
 `setRole`/`deleteRole` son no-op: el concepto de "otros usuarios" no aplica en modo local.
 
+## Agrupar proyectos relacionados (`proyecto.grupoPadre`)
+
+Algunos proyectos del Excel son en realidad "contenedores" de sub-obras — ej. "Icuadra Sn Bdo 3 y 4"
+agrupa a "Jardines de San Bernardo I" y "II". En vez de sumar eso a mano en el Excel (con el riesgo
+de que el importador la lea como un proyecto más y la sume una segunda vez a los totales de
+categoría/Resumen Directorio), cada sub-obra se importa como proyecto normal e independiente, y se
+les asigna el mismo texto libre en `proyecto.grupoPadre` (editable en el diálogo de "Nuevo/Editar
+proyecto" en "Por proyecto", con un `<datalist>` de los grupos ya existentes para no escribirlo con
+una tilde o mayúscula distinta por error — el agrupamiento es por coincidencia **exacta** de texto).
+
+En "Por proyecto" (`app.js`), `proyectosGridHtml` agrupa las tarjetas que compartan `grupoPadre` en
+una sola tarjeta expandible (`grupoCard`) con el neto/aportes/margen combinado — calculado sobre el
+flujo **neteado mes a mes** de los hijos (`mergeProyeccion`), no sumando el margen de cada uno por
+separado, para que un mes en que un hijo aporta y el otro devuelve se compense igual que si fuera un
+solo proyecto real. Al hacer clic se expande y muestra cada hijo como tarjeta normal, clickeable a
+su detalle de siempre. **El agrupamiento es puramente visual de esta vista** — cada hijo sigue
+siendo un proyecto de verdad con su propio flujo, así que Flujo de Caja mensual, categorías y Resumen
+Directorio lo siguen contando individualmente, sin doble conteo.
+
 ## Formato de Excel esperado (confirmado con archivo real de ejemplo)
 
 **Un proyecto por archivo** (modo "Un proyecto"): hoja tipo "Planificación Financiera", una fila con

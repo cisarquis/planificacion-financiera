@@ -13,7 +13,8 @@
 //   categorias/{id}          { nombre, orden }
 //   proyectos/{id}           { nombre, categoriaId, moneda, proyeccion:{'YYYY-MM':neto},
 //                              presupuesto:{'YYYY-MM':neto} (línea base, se carga una sola vez),
-//                              ultimaImportacion, createdAt, updatedAt }
+//                              anioConstruccion, grupoPadre (opcional, agrupa sub-proyectos en
+//                              "Por proyecto" — ver app.js), ultimaImportacion, createdAt, updatedAt }
 //   cajaReal/{YYYY-MM}       { monto, nota }
 //   importLog/{id}           { projId, fileName, sheet, meses, importedAt, byEmail }
 //   snapshots/{id}           { nombre, fecha, proyectos:[{id,categoriaId,nombre,proyeccion}] }
