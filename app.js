@@ -881,6 +881,10 @@
     try { return localStorage.getItem(DIR_GRAN_KEY) || 'semestral'; } catch (e) { return 'semestral'; }
   })();
   const OPEN_GRUPOS_KEY = 'pf.resumen.openGrupos';
+  // Versión guardada activa para comparar en "Flujo de caja por categoría" (null = sin comparar).
+  let resumenCompareSnapshot = null;
+  // Listado de versiones guardadas para el selector; null = todavía no se cargó.
+  let resumenSnapshotsCache = null;
   const CAT_FINANCIAMIENTO = 'Financiamiento, Dividendo e Impuestos';
   const OBRA_CHART_ANIO_DESDE = 2026;
   const OBRA_CHART_ANIO_HASTA = 2028;
@@ -968,6 +972,10 @@
     if (!state.proyectos.length) { el.innerHTML = emptyState('Sin datos', 'Importa proyectos para ver el resumen para directorio.'); return; }
 
     ensureGruposObra().then((changed) => { if (changed) renderResumenDirectorio(); });
+    if (resumenSnapshotsCache === null) {
+      resumenSnapshotsCache = [];
+      DB.listSnapshots().then((list) => { resumenSnapshotsCache = list; renderResumenDirectorio(); });
+    }
 
     const months = allMonths();
     const buckets = periodBuckets(months, resumenGranularidad);
@@ -1004,6 +1012,37 @@
     // ---- Tabla por categoría (rediseñada): 1 columna por período sin presupuesto, 2 con
     // presupuesto (Actual, Δ) — nunca 3, y nunca "0 UF" (se muestra "—").
     const hasPresupuesto = totalPpto.some((v) => v !== 0);
+
+    // ---- Comparación con una versión guardada (opcional): afecta SOLO la tabla "Flujo de
+    // caja por categoría" de abajo. Con un snapshot activo, esa tabla muestra los valores de
+    // esa versión como "Actual" y la Δ pasa a ser el cambio desde esa versión hasta hoy — el
+    // resto del panel (KPIs, gráfico, veredicto) sigue mostrando los datos actuales en vivo.
+    const catCompare = resumenCompareSnapshot;
+    let catFilas = filas;
+    if (catCompare) {
+      const snapProys = catCompare.proyectos || [];
+      catFilas = catsConProyectos.map((cat) => {
+        const proysHoy = state.proyectos.filter((p) => p.categoriaId === cat.id);
+        const proysViejo = snapProys.filter((p) => p.categoriaId === cat.id);
+        return {
+          nombre: cat.nombre,
+          actual: buckets.map((b) => sumField(proysViejo, b.months, 'proyeccion')),
+          ppto: buckets.map((b) => sumField(proysHoy, b.months, 'proyeccion')),
+        };
+      });
+    }
+    const catTotalActual = buckets.map((_, i) => catFilas.reduce((a, f) => a + f.actual[i], 0));
+    const catTotalPpto = buckets.map((_, i) => catFilas.reduce((a, f) => a + f.ppto[i], 0));
+    const catAcumActual = []; let accCA = 0; catTotalActual.forEach((v) => { accCA += v; catAcumActual.push(accCA); });
+    const catAcumPpto = []; let accCP = 0; catTotalPpto.forEach((v) => { accCP += v; catAcumPpto.push(accCP); });
+    const catHasDelta = catCompare ? true : hasPresupuesto;
+    // Sin comparar: Δ = actual − presupuesto. Comparando: Δ = hoy − versión guardada (así se
+    // ve como positivo lo que "creció" desde esa versión, sin importar que el valor mostrado
+    // como Actual sea el de esa versión antigua, no el de hoy).
+    const catDeltaOf = catCompare
+      ? (f) => f.ppto.map((p, i) => p - f.actual[i])
+      : (f) => f.actual.map((a, i) => a - f.ppto[i]);
+
     const minVal = Math.min(...acumActual);
     const minIdx = acumActual.indexOf(minVal);
     const jumpIdx = totalActual.indexOf(Math.max(...totalActual));
@@ -1057,16 +1096,15 @@
       const txt = a === 0 ? '—' : PF.fmtNum(a);
       return `<td class="num" style="text-align:center; ${bs}"><span class="${cls}">${txt}</span></td>`;
     }
-    function dirDeltaTd(a, p, bs) {
-      const d = a - p;
+    function dirDeltaTd(d, bs) {
       const dTxt = d === 0 ? '—' : (d > 0 ? '+' : '') + PF.fmtNum(d);
       const dCls = d > 0 ? 'pos' : (d < 0 ? 'neg' : 'num-zero');
       return `<td class="num" style="text-align:center; ${bs}"><span class="${dCls}">${dTxt}</span></td>`;
     }
-    function dirRowHtml(nombre, icon, actualArr, pptoArr, opts) {
+    function dirRowHtml(nombre, icon, actualArr, deltaArr, opts) {
       opts = opts || {};
       const isAcum = !!opts.isAcum;
-      const maxAcum = Math.max(...acumActual, 1);
+      const maxAcum = Math.max(...actualArr.map((v) => Math.abs(v)), 1);
       const actualsHtml = buckets.map((b, i) => {
         const a = actualArr[i];
         const bs = i > 0 ? periodBorder : '';
@@ -1077,8 +1115,8 @@
         const cls = a < 0 ? 'neg' : (a > 0 ? 'pos' : 'num-zero');
         return dirActualTd(a, cls, bs);
       }).join('');
-      const deltasHtml = hasPresupuesto
-        ? buckets.map((b, i) => dirDeltaTd(actualArr[i], pptoArr[i], i === 0 ? dirGroupGap : periodBorder)).join('')
+      const deltasHtml = deltaArr
+        ? buckets.map((b, i) => dirDeltaTd(deltaArr[i], i === 0 ? dirGroupGap : periodBorder)).join('')
         : '';
       const rowBg = opts.rowBg || '#fff';
       return `<tr style="background:${rowBg}">
@@ -1090,15 +1128,37 @@
         <td class="trend-col">${PFCharts.sparkline(actualArr)}</td>
       </tr>`;
     }
-    const dirRowsHtml = filas.map((f) => dirRowHtml(f.nombre, 'bi-diagram-2', f.actual, f.ppto)).join('');
-    const dirTotalRow = dirRowHtml('Flujo de caja del período', 'bi-arrow-left-right', totalActual, totalPpto, { weight: 700, labelColor: 'var(--pf-slate-800)', rowBg: '#eff6ff' });
-    const dirAcumRow = dirRowHtml('Caja acumulada', 'bi-wallet2', acumActual, acumPpto, { weight: 700, labelColor: 'var(--pf-slate-800)', isAcum: true });
-    const dirHeadHtml = hasPresupuesto
+    const dirRowsHtml = catFilas.map((f) => dirRowHtml(f.nombre, 'bi-diagram-2', f.actual, catHasDelta ? catDeltaOf(f) : null)).join('');
+    const dirTotalRow = dirRowHtml('Flujo de caja del período', 'bi-arrow-left-right', catTotalActual, catHasDelta ? catDeltaOf({ actual: catTotalActual, ppto: catTotalPpto }) : null, { weight: 700, labelColor: 'var(--pf-slate-800)', rowBg: '#eff6ff' });
+    const dirAcumRow = dirRowHtml('Caja acumulada', 'bi-wallet2', catAcumActual, catHasDelta ? catDeltaOf({ actual: catAcumActual, ppto: catAcumPpto }) : null, { weight: 700, labelColor: 'var(--pf-slate-800)', isAcum: true });
+    const dirHeadHtml = catHasDelta
       ? `<tr><th class="proj-col">Categoría</th>${buckets.map((b, i) => `<th class="num" style="min-width:${dirColW}; text-align:center; ${i > 0 ? periodBorder : ''}">${PF.esc(b.label)}</th>`).join('')}${buckets.map((b, i) => `<th class="num small text-muted" style="text-align:center; ${i === 0 ? dirGroupGap : periodBorder}">Δ ${PF.esc(b.label)}</th>`).join('')}<th class="trend-col">Tendencia</th></tr>`
       : `<tr><th class="proj-col">Categoría</th>${buckets.map((b, i) => `<th class="num" style="min-width:${dirColW}; text-align:center; ${i > 0 ? periodBorder : ''}">${PF.esc(b.label)}</th>`).join('')}<th class="trend-col">Tendencia</th></tr>`;
     const GRAN_OPTS = [['trimestral', 'Trimestral'], ['semestral', 'Semestral'], ['anual', 'Anual']];
     const dirTabsHtml = `<div class="dir-tabs" role="tablist">${GRAN_OPTS.map(([g, label]) =>
       `<button type="button" class="dir-tab ${g === resumenGranularidad ? 'active' : ''}" role="tab" aria-selected="${g === resumenGranularidad}" tabindex="${g === resumenGranularidad ? 0 : -1}" data-gran="${g}">${label}</button>`).join('')}</div>`;
+
+    // ---- Versiones guardadas (snapshots): guardar el estado actual y/o comparar contra una
+    // versión anterior en la tabla de categorías (ver bloque catCompare más arriba).
+    const fmtSnapFecha = (ts) => new Date(ts).toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric' });
+    const snapshotOptionsHtml = (resumenSnapshotsCache || [])
+      .map((s) => `<option value="${PF.esc(s.id)}" ${catCompare && catCompare.id === s.id ? 'selected' : ''}>${PF.esc(s.nombre)} — ${fmtSnapFecha(s.fecha)}</option>`)
+      .join('');
+    const dirSnapshotBarHtml = `<div class="dir-snapshot-bar">
+      ${isAdmin() ? '<button type="button" class="flujo-btn" id="resumen-snapshot-save"><i class="bi bi-camera"></i> Guardar versión actual</button>' : ''}
+      <label class="dir-snapshot-select-wrap">
+        <span class="small text-muted">Ver versión guardada</span>
+        <select id="resumen-snapshot-select">
+          <option value="">— Versión actual —</option>
+          ${snapshotOptionsHtml}
+        </select>
+      </label>
+    </div>`;
+    const dirCompareBannerHtml = catCompare ? `<div class="dir-compare-banner">
+      <i class="bi bi-clock-history"></i>
+      <span>Mostrando la versión <b>${PF.esc(catCompare.nombre)}</b> del ${fmtSnapFecha(catCompare.fecha)}. La columna <b>Δ</b> es el cambio desde esa versión hasta hoy.</span>
+      <button type="button" class="flujo-btn" id="resumen-snapshot-clear">Volver a la versión actual</button>
+    </div>` : '';
 
     // ---- Flujo de Obras por año de inicio (todo excepto Financiamiento, Dividendo e Impuestos).
     const finCat = state.categorias.find((c) => c.nombre === CAT_FINANCIAMIENTO);
@@ -1236,11 +1296,13 @@
             <h3>Flujo de caja por categoría</h3>
             <p class="panel-hint">Valores en UF. Sin movimiento en el período: —</p>
           </div>
-          <div style="display:flex; align-items:center; gap:12px; margin-left:auto">
+          <div style="display:flex; align-items:center; gap:12px; margin-left:auto; flex-wrap:wrap">
+            ${dirSnapshotBarHtml}
             ${dirTabsHtml}
             <button class="flujo-btn" id="resumen-excel"><i class="bi bi-file-earmark-excel" style="color:#15803d"></i> Exportar Excel</button>
           </div>
         </div>
+        ${dirCompareBannerHtml}
         ${!buckets.length ? '<div class="text-muted">No hay meses con datos.</div>' : `
         <div class="flujo-table-wrap table-sticky-col" style="margin-top:14px">
           <table class="flujo-table">
@@ -1403,12 +1465,42 @@
       });
     });
 
+    const snapshotSelectEl = el.querySelector('#resumen-snapshot-select');
+    if (snapshotSelectEl) {
+      snapshotSelectEl.addEventListener('change', async () => {
+        const id = snapshotSelectEl.value;
+        if (!id) { resumenCompareSnapshot = null; renderResumenDirectorio(); return; }
+        snapshotSelectEl.disabled = true;
+        resumenCompareSnapshot = await DB.getSnapshot(id);
+        renderResumenDirectorio();
+      });
+    }
+    const snapshotClearBtn = el.querySelector('#resumen-snapshot-clear');
+    if (snapshotClearBtn) {
+      snapshotClearBtn.addEventListener('click', () => { resumenCompareSnapshot = null; renderResumenDirectorio(); });
+    }
+    const snapshotSaveBtn = el.querySelector('#resumen-snapshot-save');
+    if (snapshotSaveBtn) {
+      snapshotSaveBtn.addEventListener('click', async () => {
+        const nombre = prompt('Nombre para esta versión:', 'Directorio ' + fmtSnapFecha(Date.now()));
+        if (!nombre) return;
+        snapshotSaveBtn.disabled = true;
+        try {
+          await DB.addSnapshot(nombre, state.proyectos);
+          resumenSnapshotsCache = null;
+          renderResumenDirectorio();
+        } finally {
+          snapshotSaveBtn.disabled = false;
+        }
+      });
+    }
+
     el.querySelector('#resumen-excel').addEventListener('click', () => {
-      const header = ['Categoría', ...buckets.flatMap((b) => (hasPresupuesto ? [b.label + ' Actual', b.label + ' Δ'] : [b.label]))];
+      const header = ['Categoría', ...buckets.flatMap((b) => (catHasDelta ? [b.label + ' Actual', b.label + ' Δ'] : [b.label]))];
       const aoa = [header];
-      filas.forEach((f) => aoa.push([f.nombre, ...buckets.flatMap((b, i) => (hasPresupuesto ? [f.actual[i], f.actual[i] - f.ppto[i]] : [f.actual[i]]))]));
-      aoa.push(['Flujo de caja del período', ...buckets.flatMap((b, i) => (hasPresupuesto ? [totalActual[i], totalActual[i] - totalPpto[i]] : [totalActual[i]]))]);
-      aoa.push(['Caja acumulada', ...buckets.flatMap((b, i) => (hasPresupuesto ? [acumActual[i], acumActual[i] - acumPpto[i]] : [acumActual[i]]))]);
+      catFilas.forEach((f) => aoa.push([f.nombre, ...buckets.flatMap((b, i) => (catHasDelta ? [f.actual[i], catDeltaOf(f)[i]] : [f.actual[i]]))]));
+      aoa.push(['Flujo de caja del período', ...buckets.flatMap((b, i) => (catHasDelta ? [catTotalActual[i], catDeltaOf({ actual: catTotalActual, ppto: catTotalPpto })[i]] : [catTotalActual[i]]))]);
+      aoa.push(['Caja acumulada', ...buckets.flatMap((b, i) => (catHasDelta ? [catAcumActual[i], catDeltaOf({ actual: catAcumActual, ppto: catAcumPpto })[i]] : [catAcumActual[i]]))]);
       PFReports.exportExcel('resumen_directorio.xlsx', 'Resumen Directorio', aoa);
     });
 

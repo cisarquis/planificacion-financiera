@@ -339,6 +339,21 @@ body {
 }
 .dir-footer-note b { color: var(--pf-slate-700); }
 .dir-footer-note a { margin-left: auto; font-size: 11.5px; font-weight: 700; }
+
+/* ---------- Resumen Directorio: versiones guardadas (snapshots) ---------- */
+.dir-snapshot-bar { display: flex; align-items: center; gap: 10px; }
+.dir-snapshot-select-wrap { display: flex; align-items: center; gap: 6px; }
+.dir-snapshot-select-wrap select {
+  padding: 6px 10px; border: 1px solid var(--pf-border); border-radius: 8px; font-size: 12.5px;
+  color: var(--pf-slate-700); background: #fff;
+}
+.dir-compare-banner {
+  display: flex; align-items: center; gap: 10px; padding: 10px 18px; margin-top: 12px;
+  background: var(--pf-primary-tint, #eff6ff); border: 1px solid var(--pf-border); border-radius: 10px;
+  font-size: 12.5px; color: var(--pf-slate-700);
+}
+.dir-compare-banner .bi { color: var(--pf-primary); font-size: 15px; flex-shrink: 0; }
+.dir-compare-banner button { margin-left: auto; flex-shrink: 0; }
 .chart-annotation { position: absolute; border-radius: 8px; padding: 7px 11px; pointer-events: none; z-index: 2; }
 .chart-annotation.dark { background: var(--pf-slate-900); box-shadow: var(--pf-shadow-callout); }
 .chart-annotation.light { background: #fff; border: 1px solid var(--pf-border); box-shadow: var(--pf-shadow); padding: 6px 10px; }

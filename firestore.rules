@@ -59,5 +59,12 @@ service cloud.firestore {
       allow read: if hasRole();
       allow write: if isAdmin();
     }
+    // Versiones guardadas del flujo de caja (snapshots). Append-only: solo se crean o borran,
+    // nunca se editan, para que una versión guardada siga siendo fiel a lo que se vio ese día.
+    match /snapshots/{id} {
+      allow read: if hasRole();
+      allow create, delete: if isAdmin();
+      allow update: if false;
+    }
   }
 }

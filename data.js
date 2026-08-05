@@ -16,6 +16,9 @@
 //                              ultimaImportacion, createdAt, updatedAt }
 //   cajaReal/{YYYY-MM}       { monto, nota }
 //   importLog/{id}           { projId, fileName, sheet, meses, importedAt, byEmail }
+//   snapshots/{id}           { nombre, fecha, proyectos:[{id,categoriaId,nombre,proyeccion}] }
+//                            — versión guardada del flujo de caja (ej. "Directorio 2026-08-05"),
+//                            solo para ver/comparar en Resumen Directorio; append-only, no se edita.
 //   roles/{email}            { role: 'admin'|'lector', nombre, addedAt } — solo lectura desde
 //                            la app; se crea/edita por consola o CLI (ver firestore.rules).
 // ============================================================================
@@ -128,6 +131,28 @@
       return this._get('importLog', []);
     },
 
+    async addSnapshot(nombre, proyectos) {
+      const list = this._get('snapshots', []);
+      const snap = {
+        id: uid('snap_'),
+        nombre,
+        fecha: Date.now(),
+        proyectos: (proyectos || []).map((p) => ({ id: p.id, categoriaId: p.categoriaId, nombre: p.nombre, proyeccion: p.proyeccion || {} })),
+      };
+      list.unshift(snap);
+      this._set('snapshots', list.slice(0, 50));
+      return snap;
+    },
+    async listSnapshots() {
+      return this._get('snapshots', []).map(({ id, nombre, fecha }) => ({ id, nombre, fecha }));
+    },
+    async getSnapshot(id) {
+      return this._get('snapshots', []).find((s) => s.id === id) || null;
+    },
+    async deleteSnapshot(id) {
+      this._set('snapshots', this._get('snapshots', []).filter((s) => s.id !== id));
+    },
+
     // Modo local no tiene login: quien abre el navegador ya es dueño de sus propios datos.
     async getRole() {
       return 'dueño';
@@ -233,6 +258,31 @@
       return qs.docs.map((d) => Object.assign({ id: d.id }, d.data()));
     },
 
+    async addSnapshot(nombre, proyectos) {
+      const { collection, addDoc } = this.fb;
+      const payload = {
+        nombre,
+        fecha: Date.now(),
+        proyectos: (proyectos || []).map((p) => ({ id: p.id, categoriaId: p.categoriaId, nombre: p.nombre, proyeccion: p.proyeccion || {} })),
+      };
+      const ref = await addDoc(collection(this.db, 'snapshots'), payload);
+      return Object.assign({ id: ref.id }, payload);
+    },
+    async listSnapshots() {
+      const { collection, query, orderBy, getDocs } = this.fb;
+      const qs = await getDocs(query(collection(this.db, 'snapshots'), orderBy('fecha', 'desc')));
+      return qs.docs.map((d) => ({ id: d.id, nombre: d.data().nombre, fecha: d.data().fecha }));
+    },
+    async getSnapshot(id) {
+      const { doc, getDoc } = this.fb;
+      const snap = await getDoc(doc(this.db, 'snapshots', id));
+      return snap.exists() ? Object.assign({ id: snap.id }, snap.data()) : null;
+    },
+    async deleteSnapshot(id) {
+      const { doc, deleteDoc } = this.fb;
+      await deleteDoc(doc(this.db, 'snapshots', id));
+    },
+
     // Rol de un correo (dueño/editor/lector), o null si no tiene documento asignado.
     async getRole(email) {
       const { doc, getDoc } = this.fb;
@@ -301,6 +351,7 @@
     'listProyectos', 'getProyecto', 'addProyecto', 'updateProyecto', 'deleteProyecto',
     'getCajaReal', 'setCajaRealMes',
     'addImportLog', 'listImportLog',
+    'addSnapshot', 'listSnapshots', 'getSnapshot', 'deleteSnapshot',
     'getRole', 'listRoles', 'setRole', 'deleteRole',
   ];
   METHODS.forEach((m) => {
