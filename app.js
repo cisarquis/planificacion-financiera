@@ -1052,15 +1052,16 @@
     </div>`;
 
     const dirColW = resumenGranularidad === 'anual' ? '108px' : (resumenGranularidad === 'trimestral' ? '74px' : '78px');
+    const dirGroupGap = 'border-left:1px solid var(--pf-border); padding-left:20px';
     function dirActualTd(a, cls, bs) {
       const txt = a === 0 ? '—' : PF.fmtNum(a);
-      return `<td class="num ${cls}" style="${bs}">${txt}</td>`;
+      return `<td class="num" style="text-align:center; ${bs}"><span class="${cls}">${txt}</span></td>`;
     }
     function dirDeltaTd(a, p, bs) {
       const d = a - p;
       const dTxt = d === 0 ? '—' : (d > 0 ? '+' : '') + PF.fmtNum(d);
       const dCls = d > 0 ? 'pos' : (d < 0 ? 'neg' : 'num-zero');
-      return `<td class="num ${dCls}" style="${bs}">${dTxt}</td>`;
+      return `<td class="num" style="text-align:center; ${bs}"><span class="${dCls}">${dTxt}</span></td>`;
     }
     function dirRowHtml(nombre, icon, actualArr, pptoArr, opts) {
       opts = opts || {};
@@ -1077,7 +1078,7 @@
         return dirActualTd(a, cls, bs);
       }).join('');
       const deltasHtml = hasPresupuesto
-        ? buckets.map((b, i) => dirDeltaTd(actualArr[i], pptoArr[i], i === 0 ? '' : periodBorder)).join('')
+        ? buckets.map((b, i) => dirDeltaTd(actualArr[i], pptoArr[i], i === 0 ? dirGroupGap : periodBorder)).join('')
         : '';
       const rowBg = opts.rowBg || '#fff';
       return `<tr style="background:${rowBg}">
@@ -1093,8 +1094,8 @@
     const dirTotalRow = dirRowHtml('Flujo de caja del período', 'bi-arrow-left-right', totalActual, totalPpto, { weight: 700, labelColor: 'var(--pf-slate-800)', rowBg: '#eff6ff' });
     const dirAcumRow = dirRowHtml('Caja acumulada', 'bi-wallet2', acumActual, acumPpto, { weight: 700, labelColor: 'var(--pf-slate-800)', isAcum: true });
     const dirHeadHtml = hasPresupuesto
-      ? `<tr><th class="proj-col">Categoría</th>${buckets.map((b, i) => `<th class="num" style="min-width:${dirColW}; ${i > 0 ? periodBorder : ''}">${PF.esc(b.label)}</th>`).join('')}${buckets.map((b, i) => `<th class="num small text-muted" style="${i === 0 ? 'border-left:2px solid var(--pf-border)' : periodBorder}">Δ ${PF.esc(b.label)}</th>`).join('')}<th class="trend-col">Tendencia</th></tr>`
-      : `<tr><th class="proj-col">Categoría</th>${buckets.map((b, i) => `<th class="num" style="min-width:${dirColW}; ${i > 0 ? periodBorder : ''}">${PF.esc(b.label)}</th>`).join('')}<th class="trend-col">Tendencia</th></tr>`;
+      ? `<tr><th class="proj-col">Categoría</th>${buckets.map((b, i) => `<th class="num" style="min-width:${dirColW}; text-align:center; ${i > 0 ? periodBorder : ''}">${PF.esc(b.label)}</th>`).join('')}${buckets.map((b, i) => `<th class="num small text-muted" style="text-align:center; ${i === 0 ? dirGroupGap : periodBorder}">Δ ${PF.esc(b.label)}</th>`).join('')}<th class="trend-col">Tendencia</th></tr>`
+      : `<tr><th class="proj-col">Categoría</th>${buckets.map((b, i) => `<th class="num" style="min-width:${dirColW}; text-align:center; ${i > 0 ? periodBorder : ''}">${PF.esc(b.label)}</th>`).join('')}<th class="trend-col">Tendencia</th></tr>`;
     const GRAN_OPTS = [['trimestral', 'Trimestral'], ['semestral', 'Semestral'], ['anual', 'Anual']];
     const dirTabsHtml = `<div class="dir-tabs" role="tablist">${GRAN_OPTS.map(([g, label]) =>
       `<button type="button" class="dir-tab ${g === resumenGranularidad ? 'active' : ''}" role="tab" aria-selected="${g === resumenGranularidad}" tabindex="${g === resumenGranularidad ? 0 : -1}" data-gran="${g}">${label}</button>`).join('')}</div>`;
