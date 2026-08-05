@@ -1243,6 +1243,7 @@
           ${snapshotOptionsHtml}
         </select>
       </label>
+      ${isAdmin() && catCompare ? '<button type="button" class="flujo-btn" id="resumen-snapshot-delete" title="Borrar esta versión"><i class="bi bi-trash text-danger"></i></button>' : ''}
     </div>`;
     const dirCompareBannerHtml = catCompare ? `<div class="dir-compare-banner">
       <i class="bi bi-clock-history"></i>
@@ -1581,6 +1582,20 @@
     const snapshotClearBtn = el.querySelector('#resumen-snapshot-clear');
     if (snapshotClearBtn) {
       snapshotClearBtn.addEventListener('click', () => { resumenCompareSnapshot = null; renderResumenDirectorio(); });
+    }
+    const snapshotDeleteBtn = el.querySelector('#resumen-snapshot-delete');
+    if (snapshotDeleteBtn) {
+      snapshotDeleteBtn.addEventListener('click', async () => {
+        const s = resumenCompareSnapshot;
+        if (!s) return;
+        if (!confirm(`¿Borrar la versión "${s.nombre}"? No se puede deshacer.`)) return;
+        snapshotDeleteBtn.disabled = true;
+        await DB.deleteSnapshot(s.id);
+        resumenCompareSnapshot = null;
+        resumenSnapshotsCache = null;
+        toast('Versión borrada', 'danger');
+        renderResumenDirectorio();
+      });
     }
     const snapshotSaveBtn = el.querySelector('#resumen-snapshot-save');
     if (snapshotSaveBtn) {
