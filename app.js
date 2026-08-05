@@ -2136,49 +2136,81 @@
   }
 
   // ------------------------------------------------------- Vista: Programar pagos
+  const PAGOS_METRIC_KEY = 'pf.pagos.metrica';
+  // 'pagar' = solo egresos (aportes, flujo &lt; 0, se muestran en positivo); 'devolucion' = solo
+  // ingresos (flujo &gt; 0); 'neto' = devolución - pagar, o sea el mismo valor con signo de
+  // proyeccion[m] (cada proyecto tiene un único neto por mes, no aportes y devoluciones por
+  // separado, así que "neto" no es más que no filtrar por signo).
+  const PAGOS_METRICAS = {
+    pagar: { label: 'Monto a pagar', titulo: 'Egresos proyectados (aportes)', colHead: 'Monto a pagar', cls: 'neg',
+      filtro: (v) => v < 0, valor: (v) => Math.abs(v) },
+    devolucion: { label: 'Devoluciones', titulo: 'Devoluciones proyectadas', colHead: 'Monto a recibir', cls: 'pos',
+      filtro: (v) => v > 0, valor: (v) => v },
+    neto: { label: 'Neto', titulo: 'Flujo neto proyectado', colHead: 'Neto', cls: '', filtro: (v) => v !== 0, valor: (v) => v },
+  };
+  let pagosMetric = (function () {
+    try { return PAGOS_METRICAS[localStorage.getItem(PAGOS_METRIC_KEY)] ? localStorage.getItem(PAGOS_METRIC_KEY) : 'pagar'; } catch (e) { return 'pagar'; }
+  })();
+
   function renderPagos() {
     const el = document.getElementById('pagos');
     const cur = PF.currentMonth();
     const months = allMonths().filter((m) => m >= cur);
     if (!months.length) { el.innerHTML = emptyState('Sin pagos futuros', 'No hay egresos proyectados desde este mes.'); return; }
 
-    // Por cada mes futuro, lista los egresos (flujo negativo) por proyecto.
+    const metrica = PAGOS_METRICAS[pagosMetric];
+    // Por cada mes futuro, lista las filas que cumplen el filtro de la métrica elegida.
     let bodyRows = '', totalGlobal = 0;
     months.forEach((m) => {
-      const egresos = state.proyectos
+      const filas = state.proyectos
         .map((p) => ({ p, val: (p.proyeccion || {})[m] || 0 }))
-        .filter((x) => x.val < 0)
-        .sort((a, b) => a.val - b.val);
-      if (!egresos.length) return;
-      const totMes = egresos.reduce((a, b) => a + b.val, 0);
+        .filter((x) => metrica.filtro(x.val))
+        .sort((a, b) => Math.abs(metrica.valor(b.val)) - Math.abs(metrica.valor(a.val)));
+      if (!filas.length) return;
+      const totMes = filas.reduce((a, b) => a + metrica.valor(b.val), 0);
       totalGlobal += totMes;
+      const totCls = totMes < 0 ? 'neg' : (totMes > 0 ? 'pos' : '');
       bodyRows += `<tr class="table-light"><td colspan="3" class="fw-semibold">${PF.monthLabel(m)}</td>
-        <td class="num fw-semibold neg">${PF.fmtMoney(totMes)}</td></tr>`;
-      egresos.forEach((x) => {
+        <td class="num fw-semibold ${totCls}">${PF.fmtMoney(totMes)}</td></tr>`;
+      filas.forEach((x) => {
+        const v = metrica.valor(x.val);
+        const cls = metrica.cls || (v < 0 ? 'neg' : (v > 0 ? 'pos' : ''));
         bodyRows += `<tr><td></td><td>${PF.esc(x.p.nombre)}</td><td class="text-muted small">${PF.esc(categoriaNombre(x.p.categoriaId))}</td>
-          <td class="num neg">${PF.fmtMoney(Math.abs(x.val), x.p.moneda)}</td></tr>`;
+          <td class="num ${cls}">${PF.fmtMoney(v, x.p.moneda)}</td></tr>`;
       });
     });
 
+    const metricOpts = Object.entries(PAGOS_METRICAS).map(([key, m]) =>
+      `<option value="${key}" ${key === pagosMetric ? 'selected' : ''}>${PF.esc(m.label)}</option>`).join('');
+
     el.innerHTML = `
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <div class="text-muted">Egresos proyectados (aportes) desde <b>${PF.monthLabel(cur)}</b> — total a programar:
-          <b class="neg">${PF.fmtMoney(Math.abs(totalGlobal))}</b></div>
-        <button class="btn btn-sm btn-outline-success" id="btn-pagos-excel"><i class="bi bi-file-earmark-excel"></i> Exportar Excel</button>
+      <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div class="text-muted">${PF.esc(metrica.titulo)} desde <b>${PF.monthLabel(cur)}</b> — total:
+          <b class="${totalGlobal < 0 ? 'neg' : (totalGlobal > 0 ? 'pos' : '')}">${PF.fmtMoney(Math.abs(totalGlobal))}</b></div>
+        <div class="d-flex align-items-center gap-2">
+          <label class="text-muted small mb-0" for="pagos-metrica">Ver</label>
+          <select class="form-select form-select-sm" id="pagos-metrica" style="width:auto">${metricOpts}</select>
+          <button class="btn btn-sm btn-outline-success" id="btn-pagos-excel"><i class="bi bi-file-earmark-excel"></i> Exportar Excel</button>
+        </div>
       </div>
       <div class="panel">
         <table class="table table-sm">
-          <thead><tr><th></th><th>Proyecto</th><th>Categoría</th><th class="num">Monto a pagar</th></tr></thead>
-          <tbody>${bodyRows || '<tr><td colspan="4" class="text-muted">Sin egresos futuros.</td></tr>'}</tbody>
+          <thead><tr><th></th><th>Proyecto</th><th>Categoría</th><th class="num">${PF.esc(metrica.colHead)}</th></tr></thead>
+          <tbody>${bodyRows || '<tr><td colspan="4" class="text-muted">Sin datos para esta métrica.</td></tr>'}</tbody>
         </table>
       </div>`;
 
+    el.querySelector('#pagos-metrica').addEventListener('change', (e) => {
+      pagosMetric = e.target.value;
+      try { localStorage.setItem(PAGOS_METRIC_KEY, pagosMetric); } catch (e2) { /* localStorage puede no estar disponible */ }
+      renderPagos();
+    });
     el.querySelector('#btn-pagos-excel').addEventListener('click', () => {
-      const aoa = [['Mes', 'Proyecto', 'Categoría', 'Monto a pagar (' + state.config.moneda + ')']];
+      const aoa = [['Mes', 'Proyecto', 'Categoría', metrica.colHead + ' (' + state.config.moneda + ')']];
       months.forEach((m) => {
         state.proyectos.forEach((p) => {
           const v = (p.proyeccion || {})[m] || 0;
-          if (v < 0) aoa.push([PF.monthLabel(m), p.nombre, categoriaNombre(p.categoriaId), Math.abs(v)]);
+          if (metrica.filtro(v)) aoa.push([PF.monthLabel(m), p.nombre, categoriaNombre(p.categoriaId), metrica.valor(v)]);
         });
       });
       PFReports.exportExcel('programacion_pagos.xlsx', 'Pagos', aoa);
