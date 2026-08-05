@@ -612,6 +612,15 @@
     const dirty = orig !== v;
     return `<td class="num p-1"><input type="number" step="any" class="form-control form-control-sm num flujo-edit-input${dirty ? ' dirty' : ''}" data-proj-id="${projId}" data-mes="${mes}" value="${v}"></td>`;
   }
+  // Año de construcción por proyecto, editable siempre (no depende de "Editar flujo") porque es un
+  // solo valor por proyecto, no una grilla — se guarda al vuelo como el resto de ediciones de un
+  // solo campo (renombrar categoría, etc.). Influye en el agrupamiento de "Flujo de Obras por año
+  // de inicio" en Resumen Directorio (ver grupoObraDe).
+  function anioCell(p) {
+    const anio = anioConstruccionEfectivo(p);
+    if (!isAdmin()) return `<td class="anio-col"><span class="anio-badge">${anio}</span></td>`;
+    return `<td class="anio-col"><input type="number" class="form-control form-control-sm anio-input" data-proj-id="${p.id}" value="${anio}" min="2000" max="2100"></td>`;
+  }
 
   function renderFlujoMensual() {
     const el = document.getElementById('flujo-mensual');
@@ -636,6 +645,7 @@
       const netArr = months.map((m) => net[m]);
       rows += `<tr class="cat-row" data-cat-id="${cat.id}" data-is-open="${isOpen}" role="button" tabindex="0">
         <td class="proj-col"><span class="row-label"><i class="bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'}"></i><span>${PF.esc(cat.nombre)}</span></span></td>
+        <td class="anio-col"></td>
         ${months.map((m) => flujoCell(net[m])).join('')}
         <td class="trend-col">${PFCharts.sparkline(netArr)}</td>
       </tr>`;
@@ -643,6 +653,7 @@
         const projArr = months.map((m) => (p.proyeccion || {})[m] || 0);
         rows += `<tr class="proj-row">
           <td class="proj-col"><span class="row-label" style="padding-left:14px"><i class="bi bi-dot"></i><span>${PF.esc(p.nombre)}</span></span></td>
+          ${anioCell(p)}
           ${months.map((m, i) => flujoProjCell(projArr[i], p.id, m)).join('')}
           <td class="trend-col">${PFCharts.sparkline(projArr)}</td>
         </tr>`;
@@ -655,18 +666,21 @@
 
     const totalRow = `<tr class="total-row">
       <td class="proj-col"><span class="row-label"><i class="bi bi-arrow-left-right"></i><span>Flujo de caja del mes</span></span></td>
+      <td class="anio-col"></td>
       ${netArr.map(flujoCell).join('')}
       <td class="trend-col">${PFCharts.sparkline(netArr)}</td>
     </tr>`;
 
     const acumRow = `<tr class="acum-row">
       <td class="proj-col"><span class="row-label"><i class="bi bi-wallet2"></i><span>Caja proyectada acumulada</span></span></td>
+      <td class="anio-col"></td>
       ${accArr.map((v) => `<td class="num ${v < umbral ? 'sem-bajo' : (v < umbral * 1.5 ? 'sem-riesgo' : 'sem-ok')}">${PF.fmtNum(v)}</td>`).join('')}
       <td class="trend-col">${PFCharts.sparkline(accArr)}</td>
     </tr>`;
 
     const realRow = `<tr class="real-row">
       <td class="proj-col"><span class="row-label"><i class="bi bi-bank"></i><span>Caja real (banco)</span></span></td>
+      <td class="anio-col"></td>
       ${realArr.map((v) => `<td class="num ${v == null ? 'num-zero' : ''}">${v != null ? PF.fmtNum(v) : '—'}</td>`).join('')}
       <td class="trend-col">${PFCharts.sparkline(realArr.map((v) => v || 0))}</td>
     </tr>`;
@@ -699,7 +713,7 @@
         <p class="panel-hint">Haz clic en una categoría para expandir sus proyectos. Rojo = aporte, verde = devolución.</p>
         <div class="flujo-table-wrap">
           <table class="flujo-table">
-            <thead><tr><th class="proj-col">Proyecto</th>${headCols}<th class="trend-col">Tendencia</th></tr></thead>
+            <thead><tr><th class="proj-col">Proyecto</th><th class="anio-col">Año constr.</th>${headCols}<th class="trend-col">Tendencia</th></tr></thead>
             <tbody>${rows}${totalRow}${acumRow}${realRow}</tbody>
           </table>
         </div>
@@ -746,6 +760,24 @@
     }
 
     if (isAdmin()) {
+      el.querySelectorAll('.anio-input').forEach((inp) => {
+        inp.addEventListener('change', async () => {
+          const projId = inp.dataset.projId;
+          const p = state.proyectos.find((x) => x.id === projId);
+          if (!p) return;
+          const val = Number(inp.value) || null;
+          inp.disabled = true;
+          try {
+            const updated = await DB.updateProyecto(projId, { anioConstruccion: val });
+            if (updated) Object.assign(p, updated);
+            renderFlujoMensual();
+          } catch (err) {
+            console.error(err);
+            toast('No se pudo guardar: ' + err.message, 'danger');
+            inp.disabled = false;
+          }
+        });
+      });
       if (!flujoEditMode) {
         el.querySelector('#flujo-edit-toggle').addEventListener('click', () => {
           flujoEditMode = true;
@@ -868,14 +900,33 @@
     return primero ? 'Obras ' + primero.slice(0, 4) : 'Sin clasificar';
   }
 
-  // Clasifica (una sola vez, perezoso) y persiste grupoObra en los proyectos que no lo tengan
-  // todavía, para que el drag-and-drop del usuario nunca se pise con un recálculo automático.
+  // Año de construcción "efectivo" de un proyecto: el que el usuario haya escrito a mano en Flujo
+  // de Caja (proyecto.anioConstruccion) si existe, o si no el inferido desde el flujo de caja (ver
+  // inferirGrupoObra) como valor por defecto para mostrar en el input antes de que alguien lo edite.
+  function anioConstruccionEfectivo(p) {
+    if (p.anioConstruccion) return Number(p.anioConstruccion);
+    const m = /^Obras (\d{4})$/.exec(p.grupoObra || inferirGrupoObra(p));
+    return m ? Number(m[1]) : new Date().getFullYear();
+  }
+
+  // "Grupo de obra" (año de inicio) usado para agrupar en Resumen Directorio: manda
+  // proyecto.anioConstruccion si el usuario lo definió a mano en Flujo de Caja — es la fuente de
+  // verdad más confiable que existe, porque no depende de adivinar el flujo de caja. Si no está
+  // definido, cae al grupoObra ya clasificado/corregido por drag-and-drop, o a la heurística.
+  function grupoObraDe(p) {
+    if (p.anioConstruccion) return 'Obras ' + Number(p.anioConstruccion);
+    return p.grupoObra || 'Sin clasificar';
+  }
+
+  // Clasifica (una sola vez, perezoso) y persiste grupoObra en los proyectos que no tengan ni
+  // grupoObra ni anioConstruccion todavía, para que el drag-and-drop del usuario nunca se pise con
+  // un recálculo automático.
   async function ensureGruposObra() {
     // Clasificación automática = escritura; un lector no tiene permiso en Firestore para
     // esto (las reglas lo rechazarían), así que ni se intenta — el admin la completa cuando entre.
     if (!isAdmin()) return false;
     const finCat = state.categorias.find((c) => c.nombre === CAT_FINANCIAMIENTO);
-    const pendientes = state.proyectos.filter((p) => !p.grupoObra && (!finCat || p.categoriaId !== finCat.id));
+    const pendientes = state.proyectos.filter((p) => !p.grupoObra && !p.anioConstruccion && (!finCat || p.categoriaId !== finCat.id));
     if (!pendientes.length) return false;
     for (const p of pendientes) {
       await DB.updateProyecto(p.id, { grupoObra: inferirGrupoObra(p) });
@@ -1049,11 +1100,11 @@
     // ---- Flujo de Obras por año de inicio (todo excepto Financiamiento, Dividendo e Impuestos).
     const finCat = state.categorias.find((c) => c.nombre === CAT_FINANCIAMIENTO);
     const obraProyectos = state.proyectos.filter((p) => !finCat || p.categoriaId !== finCat.id);
-    const grupos = Array.from(new Set(obraProyectos.map((p) => p.grupoObra || 'Sin clasificar'))).sort();
+    const grupos = Array.from(new Set(obraProyectos.map((p) => grupoObraDe(p)))).sort();
     const openGrupos = loadOpenMap(OPEN_GRUPOS_KEY);
 
     const filasObra = grupos.map((g) => {
-      const proys = obraProyectos.filter((p) => (p.grupoObra || 'Sin clasificar') === g);
+      const proys = obraProyectos.filter((p) => grupoObraDe(p) === g);
       return {
         grupo: g, proys,
         actual: buckets.map((b) => sumField(proys, b.months, 'proyeccion')),
@@ -1076,8 +1127,8 @@
 
     const obrasGruposEnRango = new Set();
     for (let y = OBRA_CHART_ANIO_DESDE; y <= OBRA_CHART_ANIO_HASTA; y++) obrasGruposEnRango.add('Obras ' + y);
-    const obraNuevaProyectos = obraProyectos.filter((p) => obrasGruposEnRango.has(p.grupoObra || 'Sin clasificar'));
-    const obraActivosProyectos = obraProyectos.filter((p) => !obrasGruposEnRango.has(p.grupoObra || 'Sin clasificar'));
+    const obraNuevaProyectos = obraProyectos.filter((p) => obrasGruposEnRango.has(grupoObraDe(p)));
+    const obraActivosProyectos = obraProyectos.filter((p) => !obrasGruposEnRango.has(grupoObraDe(p)));
     const finProyectos = finCat ? state.proyectos.filter((p) => p.categoriaId === finCat.id) : [];
     const bonoFProyectos = finProyectos.filter((p) => (p.tipo || '') === 'Bono F');
     const finCorpProyectos = finProyectos.filter((p) => (p.tipo || '') !== 'Bono F');
@@ -1316,7 +1367,12 @@
         row.style.background = '';
         const projId = e.dataTransfer.getData('text/plain');
         if (!projId) return;
-        await DB.updateProyecto(projId, { grupoObra: row.dataset.grupo });
+        // grupoObraDe() prioriza anioConstruccion sobre grupoObra, así que la corrección manual
+        // por drag-and-drop tiene que tocar ese mismo campo para que quede reflejada — si no, el
+        // valor ya definido en Flujo de Caja seguiría ganando y el drop no se vería. Soltar en
+        // "Sin clasificar" limpia anioConstruccion para que vuelva a mandar la heurística/grupoObra.
+        const m = /^Obras (\d{4})$/.exec(row.dataset.grupo);
+        await DB.updateProyecto(projId, { anioConstruccion: m ? Number(m[1]) : null, grupoObra: row.dataset.grupo });
         await loadAll();
         renderResumenDirectorio();
       });

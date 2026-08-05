@@ -102,6 +102,14 @@ Firestore, solo mueve el valor en memoria. Las celdas con un cambio sin guardar 
 misma estructura en vivo, cualquier edición manual —guardada o todavía pendiente— ya queda reflejada
 al exportar sin lógica extra de reconciliación.
 
+**Columna "Año constr."**: entre "Proyecto" y los meses, cada fila de proyecto tiene un input de año
+(`anio-input`, `app.js`) que **siempre es editable** (no depende de "Editar flujo" — es un solo campo
+por proyecto, no una grilla, así que se guarda al vuelo con `DB.updateProyecto` como el resto de
+ediciones de un solo campo). Muestra `proyecto.anioConstruccion` si ya se definió, o si no un valor
+por defecto calculado en el momento (`anioConstruccionEfectivo`, no se persiste hasta que el usuario
+lo edite). Este campo es la entrada manual para el agrupamiento de "Flujo de Obras por año de inicio"
+en Resumen Directorio — ver esa sección para el detalle de `grupoObraDe`.
+
 **Por qué comparte proyecto de Firebase con Mira pero no la base de datos**: se evaluó un proyecto
 Firebase 100% aparte, pero la cuenta de Google del usuario (`csarquis@ingevec.cl`) pertenece a la
 organización de Ingevec y esa organización **bloquea crear proyectos nuevos de Google Cloud** (ni por
@@ -274,18 +282,32 @@ contra presupuesto, a diferencia de la tabla; las anotaciones de texto (mínimo 
 renderizar, no porcentajes fijos.
 
 **Flujo de Obras por año de inicio** (misma vista, sección aparte): tabla igual de colapsable que
-Flujo de Caja pero agrupada por `proyecto.grupoObra` en vez de categoría, y **excluyendo los
-proyectos de la categoría "Financiamiento, Dividendo e Impuestos"** (constante `CAT_FINANCIAMIENTO`
-en `app.js`) — es el "flujo de obra" que pidió el usuario: todo lo que no es financiamiento
-corporativo. `grupoObra` no viene de ningún Excel; se infiere una sola vez por proyecto
-(`inferirGrupoObra`, corre perezoso vía `ensureGruposObra` al entrar a la vista y se persiste con
-`DB.updateProyecto`) buscando el primer mes con un aporte "relevante" (≥ 500 UF o ≥10% del mayor
-aporte del propio proyecto) y usando su año ("Obras 2026", etc.); si no hay ninguno, "Sin
-clasificar". **Es una simplificación deliberada**: no distingue "obras iniciadas" de "obras por
-iniciar" del mismo año (esa distinción no es inferible solo del flujo de caja) — por eso cada fila de
-proyecto es `draggable="true"` y cada fila de grupo acepta el `drop`, para que el usuario corrija a
-mano cuando la heurística se equivoque; la corrección se guarda en `grupoObra` y nunca se
-recalcula sola (`ensureGruposObra` solo clasifica proyectos que **no** tienen `grupoObra` todavía).
+Flujo de Caja pero agrupada por el año de inicio de cada proyecto en vez de categoría, y
+**excluyendo los proyectos de la categoría "Financiamiento, Dividendo e Impuestos"** (constante
+`CAT_FINANCIAMIENTO` en `app.js`) — es el "flujo de obra" que pidió el usuario: todo lo que no es
+financiamiento corporativo. El año de agrupamiento sale de `grupoObraDe(p)` (`app.js`), que prioriza
+en este orden:
+1. **`proyecto.anioConstruccion`** — un año que el usuario escribe a mano en la columna "Año
+   constr." de **Flujo de Caja mensual** (siempre editable ahí, sin depender de "Editar flujo",
+   porque es un solo valor por proyecto y no una grilla; se guarda al vuelo con
+   `DB.updateProyecto`). Es la fuente de verdad más confiable porque no depende de adivinar nada
+   del flujo de caja — si está definido, manda siempre.
+2. Si no está definido, `proyecto.grupoObra` — el valor ya clasificado/corregido por drag-and-drop
+   en esta misma sección (ver abajo).
+3. Si tampoco existe, `inferirGrupoObra(p)` — heurística que infiere el año buscando el primer mes
+   con un aporte "relevante" (≥ 500 UF o ≥10% del mayor aporte del propio proyecto) y usando su año
+   ("Obras 2026", etc.); si no hay ninguno, "Sin clasificar".
+
+**Es una simplificación deliberada**: la heurística no distingue "obras iniciadas" de "obras por
+iniciar" del mismo año (esa distinción no es inferible solo del flujo de caja) — por eso, además del
+campo "Año constr." editable, cada fila de proyecto en esta sección sigue siendo `draggable="true"` y
+cada fila de grupo acepta el `drop`, para corregir a mano cuando haga falta; soltar sobre un grupo
+real ("Obras 2026") escribe ese año en **`anioConstruccion`** (no solo en `grupoObra`, porque
+`grupoObraDe` le da prioridad a `anioConstruccion` y si no se tocara ese campo la corrección por
+drag-and-drop no se vería reflejada); soltar sobre "Sin clasificar" limpia `anioConstruccion` para
+que vuelva a mandar `grupoObra`/la heurística. `ensureGruposObra` (clasificación automática
+perezosa al entrar a la vista) solo toca proyectos que **no** tienen ni `grupoObra` ni
+`anioConstruccion` todavía, para no pisar ninguna de las dos formas de corrección manual.
 **Sección "Inversión en obras"** (2 gráficos + 1 tabla, siempre **anual y acotada a 2026-2028**
 — constantes `OBRA_CHART_ANIO_DESDE`/`_HASTA` en `app.js` — sin importar la granularidad elegida
 arriba para la tabla por categoría; `obraAnualBuckets = periodBuckets(months, 'anual')` filtrado a
