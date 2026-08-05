@@ -307,6 +307,11 @@ body {
 .flujo-table .cat-row { background: var(--pf-slate-50); cursor: pointer; }
 .flujo-table .cat-row td.proj-col { background: var(--pf-slate-50); font-weight: 700; color: var(--pf-slate-800); }
 .flujo-table .cat-row td.num { font-weight: 700; }
+/* Flujo de Obras por año de inicio: mismas filas de categoría que el resto de las tablas
+   flujo-table, pero sin negrita — el usuario la encontró recargada para una tabla con tantas
+   columnas (Ppto/Actual/Var × período). */
+.obra-table .cat-row td.proj-col { font-weight: 500; }
+.obra-table .cat-row td.num { font-weight: 400; }
 .flujo-table .proj-row td.proj-col { background: #fff; font-weight: 500; color: var(--pf-slate-600); }
 .flujo-table .proj-row:hover { background: var(--pf-slate-50); }
 .flujo-table .proj-row:hover td.proj-col { background: var(--pf-slate-50); }
@@ -354,6 +359,12 @@ body {
 }
 .dir-compare-banner .bi { color: var(--pf-primary); font-size: 15px; flex-shrink: 0; }
 .dir-compare-banner button { margin-left: auto; flex-shrink: 0; }
+.dir-cat-row { cursor: pointer; }
+.dir-cat-row:hover { background: var(--pf-slate-50) !important; }
+.dir-cat-row .row-label { gap: 5px; }
+.dir-proj-row td.proj-col { background: #fff; }
+.dir-proj-row:hover { background: var(--pf-slate-50); }
+.dir-proj-row:hover td.proj-col { background: var(--pf-slate-50); }
 .chart-annotation { position: absolute; border-radius: 8px; padding: 7px 11px; pointer-events: none; z-index: 2; }
 .chart-annotation.dark { background: var(--pf-slate-900); box-shadow: var(--pf-shadow-callout); }
 .chart-annotation.light { background: #fff; border: 1px solid var(--pf-border); box-shadow: var(--pf-shadow); padding: 6px 10px; }

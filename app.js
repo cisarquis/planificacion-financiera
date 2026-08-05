@@ -881,6 +881,7 @@
     try { return localStorage.getItem(DIR_GRAN_KEY) || 'semestral'; } catch (e) { return 'semestral'; }
   })();
   const OPEN_GRUPOS_KEY = 'pf.resumen.openGrupos';
+  const OPEN_DIR_CATS_KEY = 'pf.resumen.openDirCats';
   // Versión guardada activa para comparar en "Flujo de caja por categoría" (null = sin comparar).
   let resumenCompareSnapshot = null;
   // Listado de versiones guardadas para el selector; null = todavía no se cargó.
@@ -984,6 +985,7 @@
     const filas = catsConProyectos.map((cat) => {
       const proys = state.proyectos.filter((p) => p.categoriaId === cat.id);
       return {
+        id: cat.id,
         nombre: cat.nombre,
         actual: buckets.map((b) => sumField(proys, b.months, 'proyeccion')),
         ppto: buckets.map((b) => sumField(proys, b.months, 'presupuesto')),
@@ -1002,7 +1004,7 @@
       const cells = buckets.map((b, i) => {
         const a = actualArr[i], p = pptoArr[i], v = a - p;
         const bs = i > 0 ? periodBorder : '';
-        return `<td class="num" style="${bs}">${PF.fmtMoney(p)}</td><td class="num">${PF.fmtMoney(a)}</td><td class="num ${v < 0 ? 'neg' : 'pos'}">${PF.fmtMoney(v)}</td>`;
+        return `<td class="num" style="${bs}">${PF.fmtNum(p)}</td><td class="num">${PF.fmtNum(a)}</td><td class="num ${v < 0 ? 'neg' : 'pos'}">${PF.fmtNum(v)}</td>`;
       }).join('');
       return `<tr class="${cls || ''}"><td class="proj-col">${PF.esc(nombre)}</td>${cells}</tr>`;
     }
@@ -1025,12 +1027,29 @@
         const proysHoy = state.proyectos.filter((p) => p.categoriaId === cat.id);
         const proysViejo = snapProys.filter((p) => p.categoriaId === cat.id);
         return {
+          id: cat.id,
           nombre: cat.nombre,
           actual: buckets.map((b) => sumField(proysViejo, b.months, 'proyeccion')),
           ppto: buckets.map((b) => sumField(proysHoy, b.months, 'proyeccion')),
         };
       });
     }
+    // Detalle por proyecto dentro de cada categoría, para el desglose expandible de abajo —
+    // mismo criterio que catFilas: actual = versión comparada (o la de hoy si no hay
+    // comparación), ppto = base de la Δ (hoy si se compara, presupuesto si no).
+    const catProyectosDetalle = {};
+    catsConProyectos.forEach((cat) => {
+      const proysHoy = state.proyectos.filter((p) => p.categoriaId === cat.id);
+      const proysViejo = catCompare ? (catCompare.proyectos || []).filter((p) => p.categoriaId === cat.id) : null;
+      catProyectosDetalle[cat.id] = proysHoy.map((p) => {
+        const pViejo = catCompare ? (proysViejo.find((v) => v.id === p.id) || { proyeccion: {} }) : null;
+        return {
+          nombre: p.nombre,
+          actual: buckets.map((b) => sumField([catCompare ? pViejo : p], b.months, 'proyeccion')),
+          ppto: buckets.map((b) => sumField([p], b.months, catCompare ? 'proyeccion' : 'presupuesto')),
+        };
+      });
+    });
     const catTotalActual = buckets.map((_, i) => catFilas.reduce((a, f) => a + f.actual[i], 0));
     const catTotalPpto = buckets.map((_, i) => catFilas.reduce((a, f) => a + f.ppto[i], 0));
     const catAcumActual = []; let accCA = 0; catTotalActual.forEach((v) => { accCA += v; catAcumActual.push(accCA); });
@@ -1101,9 +1120,7 @@
       const dCls = d > 0 ? 'pos' : (d < 0 ? 'neg' : 'num-zero');
       return `<td class="num" style="text-align:center; ${bs}"><span class="${dCls}">${dTxt}</span></td>`;
     }
-    function dirRowHtml(nombre, icon, actualArr, deltaArr, opts) {
-      opts = opts || {};
-      const isAcum = !!opts.isAcum;
+    function dirNumCells(actualArr, deltaArr, isAcum) {
       const maxAcum = Math.max(...actualArr.map((v) => Math.abs(v)), 1);
       const actualsHtml = buckets.map((b, i) => {
         const a = actualArr[i];
@@ -1118,17 +1135,42 @@
       const deltasHtml = deltaArr
         ? buckets.map((b, i) => dirDeltaTd(deltaArr[i], i === 0 ? dirGroupGap : periodBorder)).join('')
         : '';
+      return actualsHtml + deltasHtml;
+    }
+    function dirRowHtml(nombre, icon, actualArr, deltaArr, opts) {
+      opts = opts || {};
       const rowBg = opts.rowBg || '#fff';
-      return `<tr style="background:${rowBg}">
+      const isCat = !!opts.catId;
+      const isOpen = isCat && (Object.prototype.hasOwnProperty.call(openDirCats, opts.catId) ? openDirCats[opts.catId] : false);
+      const labelHtml = isCat
+        ? `<span class="row-label"><i class="bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'}"></i><i class="bi ${icon}"></i><span>${PF.esc(nombre)}</span></span>`
+        : `<span class="row-label"><i class="bi ${icon}"></i><span>${PF.esc(nombre)}</span></span>`;
+      return `<tr style="background:${rowBg}" ${isCat ? `class="dir-cat-row" data-catid="${PF.esc(opts.catId)}" role="button" tabindex="0"` : ''}>
         <td class="proj-col" style="background:${rowBg}; font-weight:${opts.weight || 500}; color:${opts.labelColor || 'var(--pf-slate-700)'}">
-          <span class="row-label"><i class="bi ${icon}"></i><span>${PF.esc(nombre)}</span></span>
+          ${labelHtml}
         </td>
-        ${actualsHtml}
-        ${deltasHtml}
+        ${dirNumCells(actualArr, deltaArr, !!opts.isAcum)}
         <td class="trend-col">${PFCharts.sparkline(actualArr)}</td>
       </tr>`;
     }
-    const dirRowsHtml = catFilas.map((f) => dirRowHtml(f.nombre, 'bi-diagram-2', f.actual, catHasDelta ? catDeltaOf(f) : null)).join('');
+    function dirProjRowHtml(nombre, actualArr, deltaArr) {
+      return `<tr class="dir-proj-row">
+        <td class="proj-col" style="padding-left:34px; font-weight:400; color:var(--pf-slate-500)">
+          <span class="row-label"><i class="bi bi-dot"></i><span>${PF.esc(nombre)}</span></span>
+        </td>
+        ${dirNumCells(actualArr, deltaArr, false)}
+        <td class="trend-col">${PFCharts.sparkline(actualArr)}</td>
+      </tr>`;
+    }
+    const openDirCats = loadOpenMap(OPEN_DIR_CATS_KEY);
+    const dirRowsHtml = catFilas.map((f) => {
+      const catRow = dirRowHtml(f.nombre, 'bi-diagram-2', f.actual, catHasDelta ? catDeltaOf(f) : null, { catId: f.id });
+      const isOpen = Object.prototype.hasOwnProperty.call(openDirCats, f.id) ? openDirCats[f.id] : false;
+      const detalleHtml = isOpen
+        ? (catProyectosDetalle[f.id] || []).map((p) => dirProjRowHtml(p.nombre, p.actual, catHasDelta ? catDeltaOf(p) : null)).join('')
+        : '';
+      return catRow + detalleHtml;
+    }).join('');
     const dirTotalRow = dirRowHtml('Flujo de caja del período', 'bi-arrow-left-right', catTotalActual, catHasDelta ? catDeltaOf({ actual: catTotalActual, ppto: catTotalPpto }) : null, { weight: 700, labelColor: 'var(--pf-slate-800)', rowBg: '#eff6ff' });
     const dirAcumRow = dirRowHtml('Caja acumulada', 'bi-wallet2', catAcumActual, catHasDelta ? catDeltaOf({ actual: catAcumActual, ppto: catAcumPpto }) : null, { weight: 700, labelColor: 'var(--pf-slate-800)', isAcum: true });
     const dirHeadHtml = catHasDelta
@@ -1251,7 +1293,7 @@
       const cells = buckets.map((b, i) => {
         const a = f.actual[i], p = f.ppto[i], v = a - p;
         const bs = i > 0 ? periodBorder : '';
-        return `<td class="num" style="${bs}">${PF.fmtMoney(p)}</td><td class="num">${PF.fmtMoney(a)}</td><td class="num ${v < 0 ? 'neg' : 'pos'}">${PF.fmtMoney(v)}</td>`;
+        return `<td class="num" style="${bs}">${PF.fmtNum(p)}</td><td class="num">${PF.fmtNum(a)}</td><td class="num ${v < 0 ? 'neg' : 'pos'}">${PF.fmtNum(v)}</td>`;
       }).join('');
       const grupoRow = `<tr class="cat-row" data-grupo="${PF.esc(f.grupo)}" data-is-open="${isOpen}" role="button" tabindex="0">
         <td class="proj-col"><span class="row-label"><i class="bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'}"></i><span>${PF.esc(f.grupo)}</span></span></td>
@@ -1263,7 +1305,7 @@
         const pCells = buckets.map((b, i) => {
           const a = pActual[i], pp = pPpto[i], v = a - pp;
           const bs = i > 0 ? periodBorder : '';
-          return `<td class="num" style="${bs}">${PF.fmtMoney(pp)}</td><td class="num">${PF.fmtMoney(a)}</td><td class="num ${v < 0 ? 'neg' : 'pos'}">${PF.fmtMoney(v)}</td>`;
+          return `<td class="num" style="${bs}">${PF.fmtNum(pp)}</td><td class="num">${PF.fmtNum(a)}</td><td class="num ${v < 0 ? 'neg' : 'pos'}">${PF.fmtNum(v)}</td>`;
         }).join('');
         return `<tr class="proj-row" ${isAdmin() ? 'draggable="true"' : ''} data-proj-id="${p.id}">
           <td class="proj-col"><span class="row-label" style="padding-left:14px; ${isAdmin() ? 'cursor:grab' : ''}"><i class="bi bi-dot"></i><span>${PF.esc(p.nombre)}</span></span></td>
@@ -1272,8 +1314,8 @@
       }).join('') : '';
       return grupoRow + proyRows;
     }).join('');
-    const obraTotalRow = filaHtml('Flujo de caja (obra)', totalActualObra, totalPptoObra, 'table-light fw-semibold');
-    const obraAcumRow = filaHtml('Flujo acumulado (obra)', acumActualObra, acumPptoObra, 'table-light fw-semibold');
+    const obraTotalRow = filaHtml('Flujo de caja (obra)', totalActualObra, totalPptoObra, 'table-light');
+    const obraAcumRow = filaHtml('Flujo acumulado (obra)', acumActualObra, acumPptoObra, 'table-light');
 
     el.innerHTML = `
       ${verdictHtml}
@@ -1318,10 +1360,10 @@
       </div>
       <div class="panel">
         <h6>Flujo de Obras por año de inicio</h6>
-        <p class="panel-hint">Todo excepto "${PF.esc(CAT_FINANCIAMIENTO)}". El año se infiere del primer aporte relevante de cada
-          proyecto — arrastra una fila a otro grupo si hace falta corregirlo.</p>
+        <p class="panel-hint">Todo excepto "${PF.esc(CAT_FINANCIAMIENTO)}". Valores en UF. El año se infiere del primer aporte
+          relevante de cada proyecto — arrastra una fila a otro grupo si hace falta corregirlo.</p>
         ${!buckets.length ? '<div class="text-muted">No hay meses con datos.</div>' : `
-        <div class="flujo-table-wrap table-sticky-col">
+        <div class="flujo-table-wrap table-sticky-col obra-table">
           <table class="flujo-table">
             <thead>
               <tr><th class="proj-col"></th>${headCols}</tr>
@@ -1463,6 +1505,19 @@
         next.focus();
         setGran(next.dataset.gran);
       });
+    });
+
+    el.querySelectorAll('.dir-cat-row[data-catid]').forEach((row) => {
+      const toggle = () => {
+        const id = row.dataset.catid;
+        const wasOpen = Object.prototype.hasOwnProperty.call(openDirCats, id) ? openDirCats[id] : false;
+        const cur = loadOpenMap(OPEN_DIR_CATS_KEY);
+        cur[id] = !wasOpen;
+        saveOpenMap(OPEN_DIR_CATS_KEY, cur);
+        renderResumenDirectorio();
+      };
+      row.addEventListener('click', toggle);
+      row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
     });
 
     const snapshotSelectEl = el.querySelector('#resumen-snapshot-select');
