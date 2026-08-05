@@ -159,14 +159,24 @@ les asigna el mismo texto libre en `proyecto.grupoPadre` (editable en el diálog
 proyecto" en "Por proyecto", con un `<datalist>` de los grupos ya existentes para no escribirlo con
 una tilde o mayúscula distinta por error — el agrupamiento es por coincidencia **exacta** de texto).
 
-En "Por proyecto" (`app.js`), `proyectosGridHtml` agrupa las tarjetas que compartan `grupoPadre` en
-una sola tarjeta expandible (`grupoCard`) con el neto/aportes/margen combinado — calculado sobre el
-flujo **neteado mes a mes** de los hijos (`mergeProyeccion`), no sumando el margen de cada uno por
-separado, para que un mes en que un hijo aporta y el otro devuelve se compense igual que si fuera un
-solo proyecto real. Al hacer clic se expande y muestra cada hijo como tarjeta normal, clickeable a
-su detalle de siempre. **El agrupamiento es puramente visual de esta vista** — cada hijo sigue
-siendo un proyecto de verdad con su propio flujo, así que Flujo de Caja mensual, categorías y Resumen
-Directorio lo siguen contando individualmente, sin doble conteo.
+El agrupamiento se ve en dos vistas, ambas leyendo el mismo `grupoPadre` y comparten el estado
+abierto/cerrado (`OPEN_PROJ_GRUPOS_KEY` en `localStorage`, así expandir un grupo en una vista lo deja
+expandido en la otra):
+- **"Por proyecto"**: `proyectosGridHtml` agrupa las tarjetas que compartan `grupoPadre` en una sola
+  tarjeta expandible (`grupoCard`). Al hacer clic se expande y muestra cada hijo como tarjeta normal,
+  clickeable a su detalle de siempre.
+- **"Flujo de Caja mensual"**: `flujoProyectoRowsHtml` hace lo mismo pero como filas de tabla
+  (`flujoGrupoRow`/`flujoProyectoRow`) dentro de cada categoría — el grupo aparece como una fila
+  colapsable con chevron (como una categoría, pero para un sub-conjunto de sus proyectos) y al
+  expandirla los hijos aparecen indentados debajo, con sus celdas editables normales (`flujoProjCell`,
+  año de construcción) intactas.
+
+En ambos casos el neto/aportes/margen combinado (o el flujo mensual combinado, en la tabla) se
+calcula sobre el flujo **neteado mes a mes** de los hijos (`mergeProyeccion`), no sumando el margen de
+cada uno por separado, para que un mes en que un hijo aporta y el otro devuelve se compense igual que
+si fuera un solo proyecto real. **El agrupamiento es puramente visual** — cada hijo sigue siendo un
+proyecto de verdad con su propio flujo, así que los totales de categoría, Resumen Directorio y el
+resto de la app lo siguen contando individualmente, sin doble conteo.
 
 ## Formato de Excel esperado (confirmado con archivo real de ejemplo)
 

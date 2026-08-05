@@ -621,6 +621,51 @@
     if (!isAdmin()) return `<td class="anio-col"><span class="anio-badge">${anio}</span></td>`;
     return `<td class="anio-col"><input type="number" class="form-control form-control-sm anio-input" data-proj-id="${p.id}" value="${anio}" min="2000" max="2100"></td>`;
   }
+  // Fila de un proyecto normal dentro de Flujo de Caja mensual — indent mayor (28px) cuando está
+  // anidado bajo la fila de un grupo (ver flujoGrupoRow), para que se note visualmente que es un
+  // sub-proyecto de ese grupo y no otro proyecto suelto de la categoría.
+  function flujoProyectoRow(p, months, indent) {
+    const projArr = months.map((m) => (p.proyeccion || {})[m] || 0);
+    return `<tr class="proj-row">
+      <td class="proj-col"><span class="row-label" style="padding-left:${indent || 14}px"><i class="bi bi-dot"></i><span>${PF.esc(p.nombre)}</span></span></td>
+      ${anioCell(p)}
+      ${months.map((m, i) => flujoProjCell(projArr[i], p.id, m)).join('')}
+      <td class="trend-col">${PFCharts.sparkline(projArr)}</td>
+    </tr>`;
+  }
+  // Fila de un grupo (proyecto.grupoPadre) dentro de Flujo de Caja mensual: muestra el flujo
+  // neteado mes a mes de sus proyectos hijos (mergeProyeccion, la misma función que usa "Por
+  // proyecto") y se puede expandir/contraer para ver cada hijo como fila normal debajo — el
+  // estado abierto/cerrado se guarda en la misma key que "Por proyecto" (OPEN_PROJ_GRUPOS_KEY),
+  // para que expandir un grupo en una vista lo deje expandido en la otra también.
+  function flujoGrupoRow(nombre, children, months, isOpen) {
+    const merged = mergeProyeccion(children);
+    const arr = months.map((m) => merged[m] || 0);
+    return `<tr class="proj-row" data-grupo-flujo="${PF.esc(nombre)}" role="button" tabindex="0" style="cursor:pointer">
+      <td class="proj-col"><span class="row-label" style="padding-left:14px"><i class="bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'}"></i><span>${PF.esc(nombre)}</span></span></td>
+      <td class="anio-col"></td>
+      ${months.map((m, i) => flujoCell(arr[i])).join('')}
+      <td class="trend-col">${PFCharts.sparkline(arr)}</td>
+    </tr>`;
+  }
+  // Arma las filas de proyecto de una categoría (dentro de Flujo de Caja mensual), agrupando los
+  // que compartan grupoPadre en una sola fila expandible en vez de listarlos sueltos — mismo
+  // criterio que proyectosGridHtml en "Por proyecto".
+  function flujoProyectoRowsHtml(proys, months) {
+    const openGrupos = loadOpenMap(OPEN_PROJ_GRUPOS_KEY);
+    const seen = new Set();
+    let out = '';
+    proys.forEach((p) => {
+      if (!p.grupoPadre) { out += flujoProyectoRow(p, months); return; }
+      if (seen.has(p.grupoPadre)) return;
+      seen.add(p.grupoPadre);
+      const children = proys.filter((x) => x.grupoPadre === p.grupoPadre);
+      const isOpen = openGrupos[p.grupoPadre] === true;
+      out += flujoGrupoRow(p.grupoPadre, children, months, isOpen);
+      if (isOpen) children.forEach((c) => { out += flujoProyectoRow(c, months, 28); });
+    });
+    return out;
+  }
 
   function renderFlujoMensual() {
     const el = document.getElementById('flujo-mensual');
@@ -649,15 +694,7 @@
         ${months.map((m) => flujoCell(net[m])).join('')}
         <td class="trend-col">${PFCharts.sparkline(netArr)}</td>
       </tr>`;
-      if (isOpen) proys.forEach((p) => {
-        const projArr = months.map((m) => (p.proyeccion || {})[m] || 0);
-        rows += `<tr class="proj-row">
-          <td class="proj-col"><span class="row-label" style="padding-left:14px"><i class="bi bi-dot"></i><span>${PF.esc(p.nombre)}</span></span></td>
-          ${anioCell(p)}
-          ${months.map((m, i) => flujoProjCell(projArr[i], p.id, m)).join('')}
-          <td class="trend-col">${PFCharts.sparkline(projArr)}</td>
-        </tr>`;
-      });
+      if (isOpen) rows += flujoProyectoRowsHtml(proys, months);
     });
 
     const netArr = months.map((m) => t.net[m]);
@@ -738,6 +775,17 @@
         const cur = loadOpenMap(OPEN_CATS_KEY);
         cur[id] = !wasOpen;
         saveOpenMap(OPEN_CATS_KEY, cur);
+        renderFlujoMensual();
+      };
+      row.addEventListener('click', toggle);
+      row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+    });
+    el.querySelectorAll('[data-grupo-flujo]').forEach((row) => {
+      const toggle = () => {
+        const nombre = row.dataset.grupoFlujo;
+        const cur = loadOpenMap(OPEN_PROJ_GRUPOS_KEY);
+        cur[nombre] = !(cur[nombre] === true);
+        saveOpenMap(OPEN_PROJ_GRUPOS_KEY, cur);
         renderFlujoMensual();
       };
       row.addEventListener('click', toggle);
