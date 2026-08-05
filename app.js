@@ -1052,37 +1052,40 @@
     </div>`;
 
     const dirColW = resumenGranularidad === 'anual' ? '108px' : (resumenGranularidad === 'trimestral' ? '74px' : '78px');
-    function dirCellPair(a, p) {
-      const cls = a < 0 ? 'neg' : (a > 0 ? 'pos' : 'num-zero');
+    function dirActualTd(a, cls, bs) {
       const txt = a === 0 ? '—' : PF.fmtNum(a);
-      const actualTd = `<td class="num ${cls}">${txt}</td>`;
-      if (!hasPresupuesto) return actualTd;
-      const d = a - p;
-      const dTxt = d === 0 ? '—' : (d > 0 ? '+' : '') + PF.fmtNum(d);
-      const dCls = d > 0 ? 'pos' : (d < 0 ? 'neg' : 'num-zero');
-      return actualTd + `<td class="num ${dCls}">${dTxt}</td>`;
+      return `<td class="num ${cls}" style="${bs}">${txt}</td>`;
     }
-    function dirAcumCellPair(a, p) {
-      const maxAcum = Math.max(...acumActual, 1);
-      const semClass = a < 0 ? 'sem-bajo' : (a > maxAcum * 0.25 ? 'sem-ok' : '');
-      const txt = a === 0 ? '—' : PF.fmtNum(a);
-      const actualTd = `<td class="num ${semClass}" ${semClass ? '' : 'style="background:#f8fafc"'}>${txt}</td>`;
-      if (!hasPresupuesto) return actualTd;
+    function dirDeltaTd(a, p, bs) {
       const d = a - p;
       const dTxt = d === 0 ? '—' : (d > 0 ? '+' : '') + PF.fmtNum(d);
       const dCls = d > 0 ? 'pos' : (d < 0 ? 'neg' : 'num-zero');
-      return actualTd + `<td class="num ${dCls}">${dTxt}</td>`;
+      return `<td class="num ${dCls}" style="${bs}">${dTxt}</td>`;
     }
     function dirRowHtml(nombre, icon, actualArr, pptoArr, opts) {
       opts = opts || {};
-      const cellFn = opts.isAcum ? dirAcumCellPair : dirCellPair;
-      const cellsHtml = buckets.map((b, i) => cellFn(actualArr[i], pptoArr[i])).join('');
+      const isAcum = !!opts.isAcum;
+      const maxAcum = Math.max(...acumActual, 1);
+      const actualsHtml = buckets.map((b, i) => {
+        const a = actualArr[i];
+        const bs = i > 0 ? periodBorder : '';
+        if (isAcum) {
+          const semClass = a < 0 ? 'sem-bajo' : (a > maxAcum * 0.25 ? 'sem-ok' : '');
+          return dirActualTd(a, semClass, `${bs}${semClass ? '' : 'background:#f8fafc'}`);
+        }
+        const cls = a < 0 ? 'neg' : (a > 0 ? 'pos' : 'num-zero');
+        return dirActualTd(a, cls, bs);
+      }).join('');
+      const deltasHtml = hasPresupuesto
+        ? buckets.map((b, i) => dirDeltaTd(actualArr[i], pptoArr[i], i === 0 ? '' : periodBorder)).join('')
+        : '';
       const rowBg = opts.rowBg || '#fff';
       return `<tr style="background:${rowBg}">
         <td class="proj-col" style="background:${rowBg}; font-weight:${opts.weight || 500}; color:${opts.labelColor || 'var(--pf-slate-700)'}">
           <span class="row-label"><i class="bi ${icon}"></i><span>${PF.esc(nombre)}</span></span>
         </td>
-        ${cellsHtml}
+        ${actualsHtml}
+        ${deltasHtml}
         <td class="trend-col">${PFCharts.sparkline(actualArr)}</td>
       </tr>`;
     }
@@ -1090,9 +1093,8 @@
     const dirTotalRow = dirRowHtml('Flujo de caja del período', 'bi-arrow-left-right', totalActual, totalPpto, { weight: 700, labelColor: 'var(--pf-slate-800)', rowBg: '#eff6ff' });
     const dirAcumRow = dirRowHtml('Caja acumulada', 'bi-wallet2', acumActual, acumPpto, { weight: 700, labelColor: 'var(--pf-slate-800)', isAcum: true });
     const dirHeadHtml = hasPresupuesto
-      ? `<tr><th class="proj-col"></th>${buckets.map((b) => `<th class="num" colspan="2" style="min-width:${dirColW}">${PF.esc(b.label)}</th>`).join('')}<th class="trend-col"></th></tr>
-         <tr><th class="proj-col">Categoría</th>${buckets.map(() => '<th class="num small text-muted">Actual</th><th class="num small text-muted">Δ</th>').join('')}<th class="trend-col">Tendencia</th></tr>`
-      : `<tr><th class="proj-col">Categoría</th>${buckets.map((b) => `<th class="num" style="min-width:${dirColW}">${PF.esc(b.label)}</th>`).join('')}<th class="trend-col">Tendencia</th></tr>`;
+      ? `<tr><th class="proj-col">Categoría</th>${buckets.map((b, i) => `<th class="num" style="min-width:${dirColW}; ${i > 0 ? periodBorder : ''}">${PF.esc(b.label)}</th>`).join('')}${buckets.map((b, i) => `<th class="num small text-muted" style="${i === 0 ? 'border-left:2px solid var(--pf-border)' : periodBorder}">Δ ${PF.esc(b.label)}</th>`).join('')}<th class="trend-col">Tendencia</th></tr>`
+      : `<tr><th class="proj-col">Categoría</th>${buckets.map((b, i) => `<th class="num" style="min-width:${dirColW}; ${i > 0 ? periodBorder : ''}">${PF.esc(b.label)}</th>`).join('')}<th class="trend-col">Tendencia</th></tr>`;
     const GRAN_OPTS = [['trimestral', 'Trimestral'], ['semestral', 'Semestral'], ['anual', 'Anual']];
     const dirTabsHtml = `<div class="dir-tabs" role="tablist">${GRAN_OPTS.map(([g, label]) =>
       `<button type="button" class="dir-tab ${g === resumenGranularidad ? 'active' : ''}" role="tab" aria-selected="${g === resumenGranularidad}" tabindex="${g === resumenGranularidad ? 0 : -1}" data-gran="${g}">${label}</button>`).join('')}</div>`;
@@ -1449,13 +1451,21 @@
 
   function proyectoCard(p) {
     const months = Object.keys(p.proyeccion || {}).sort();
-    const total = Object.values(p.proyeccion || {}).reduce((a, b) => a + b, 0);
+    const vals = Object.values(p.proyeccion || {});
+    const total = vals.reduce((a, b) => a + b, 0);
+    // Aportes = solo los meses de flujo negativo (lo que "pone" el proyecto), en positivo para
+    // mostrar. Margen = neto / aportes: qué porcentaje de lo aportado vuelve como neto — si no hay
+    // aportes (proyecto sin flujo negativo, ej. puro financiamiento) el margen no aplica ("—").
+    const aportes = Math.abs(vals.filter((v) => v < 0).reduce((a, b) => a + b, 0));
+    const margen = aportes ? (total / aportes) * 100 : null;
     return `<div class="col-md-4 col-lg-3">
       <div class="panel mb-0" style="cursor:pointer" data-proj="${p.id}">
         <div class="fw-semibold text-truncate">${PF.esc(p.nombre)}</div>
         <div class="text-muted small mb-2">${PF.esc(categoriaNombre(p.categoriaId))}${p.tipo ? ' · ' + PF.esc(p.tipo) : ''}</div>
         <div class="small">Meses: ${months.length}</div>
         <div class="small ${total < 0 ? 'neg' : 'pos'}">Neto: ${PF.fmtMoney(total, p.moneda)}</div>
+        <div class="small neg">Aportes: ${PF.fmtMoney(aportes, p.moneda)}</div>
+        <div class="small ${margen == null ? 'text-muted' : (margen < 0 ? 'neg' : 'pos')}">Margen: ${margen == null ? '—' : PF.fmtNum(margen) + '%'}</div>
       </div></div>`;
   }
 
