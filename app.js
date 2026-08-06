@@ -748,7 +748,7 @@
       <div class="panel mb-0">
         <h3>Flujo de caja mensual por proyecto</h3>
         <p class="panel-hint">Haz clic en una categoría para expandir sus proyectos. Rojo = aporte, verde = devolución.</p>
-        <div class="flujo-table-wrap">
+        <div class="flujo-table-wrap flujo-scroll">
           <table class="flujo-table">
             <thead><tr><th class="proj-col">Proyecto</th><th class="anio-col">Año constr.</th>${headCols}<th class="trend-col">Tendencia</th></tr></thead>
             <tbody>${rows}${totalRow}${acumRow}${realRow}</tbody>
@@ -1395,7 +1395,7 @@
         </div>
         ${dirCompareBannerHtml}
         ${!buckets.length ? '<div class="text-muted">No hay meses con datos.</div>' : `
-        <div class="flujo-table-wrap table-sticky-col" style="margin-top:14px">
+        <div class="flujo-table-wrap table-sticky-col flujo-scroll" style="margin-top:14px">
           <table class="flujo-table">
             <thead>${dirHeadHtml}</thead>
             <tbody>${dirRowsHtml}${dirTotalRow}${dirAcumRow}</tbody>
@@ -1412,7 +1412,7 @@
         <p class="panel-hint">Todo excepto "${PF.esc(CAT_FINANCIAMIENTO)}". Valores en UF. El año se infiere del primer aporte
           relevante de cada proyecto — arrastra una fila a otro grupo si hace falta corregirlo.</p>
         ${!buckets.length ? '<div class="text-muted">No hay meses con datos.</div>' : `
-        <div class="flujo-table-wrap table-sticky-col obra-table">
+        <div class="flujo-table-wrap table-sticky-col flujo-scroll obra-table">
           <table class="flujo-table">
             <thead>
               <tr><th class="proj-col"></th>${headCols}</tr>
@@ -1459,7 +1459,7 @@
           <button class="flujo-btn" id="resumen-obra-excel"><i class="bi bi-file-earmark-excel" style="color:#15803d"></i> Exportar Excel</button>
         </div>
         ${obraAnualLabels.length ? `
-        <div class="flujo-table-wrap table-sticky-col">
+        <div class="flujo-table-wrap table-sticky-col flujo-scroll">
           <table class="flujo-table">
             <thead>${tablaObraHeadAnios}${tablaObraHeadCols}</thead>
             <tbody>${lineasTablaObraHtml}${tablaObraTotalRow}${tablaObraAcumRow}</tbody>
@@ -1637,6 +1637,19 @@
 
   // ------------------------------------------------------- Vista: Por proyecto
   const OPEN_PROJ_GRUPOS_KEY = 'pf.proyectos.openGrupos';
+  const OPEN_PROJ_CATS_KEY = 'pf.proyectos.openCats';
+  let proyectosBuscar = '';
+  const ESTADOS_PROYECTO = [
+    { id: 'evaluacion', nombre: 'En evaluación', color: 'var(--pf-warning-700)', bg: 'var(--pf-warning-100)' },
+    { id: 'ejecucion', nombre: 'En ejecución', color: 'var(--pf-primary-700)', bg: 'var(--pf-primary-100)' },
+    { id: 'terminado', nombre: 'Terminado', color: 'var(--pf-success-700)', bg: 'var(--pf-success-100)' },
+  ];
+  function estadoInfo(id) { return ESTADOS_PROYECTO.find((e) => e.id === id) || null; }
+  function estadoBadgeHtml(id) {
+    const e = estadoInfo(id);
+    if (!e) return '';
+    return `<span class="estado-badge" style="color:${e.color}; background:${e.bg}">${PF.esc(e.nombre)}</span>`;
+  }
 
   // Meses/Neto/Aportes/Margen a partir de una proyección — se usa tanto para un proyecto normal
   // como para el neto combinado de un grupo (ver mergeProyeccion), así el cálculo es siempre el
@@ -1670,7 +1683,10 @@
   function proyectoCard(p) {
     return `<div class="col-md-4 col-lg-3">
       <div class="panel mb-0" style="cursor:pointer" data-proj="${p.id}">
-        <div class="fw-semibold text-truncate">${PF.esc(p.nombre)}</div>
+        <div class="d-flex align-items-start justify-content-between gap-2">
+          <div class="fw-semibold text-truncate">${PF.esc(p.nombre)}</div>
+          ${estadoBadgeHtml(p.estado)}
+        </div>
         <div class="text-muted small mb-2">${PF.esc(categoriaNombre(p.categoriaId))}${p.tipo ? ' · ' + PF.esc(p.tipo) : ''}</div>
         ${statsRowsHtml(flowStats(p.proyeccion), p.moneda)}
       </div></div>`;
@@ -1715,20 +1731,46 @@
 
   function renderProyectos() {
     const el = document.getElementById('proyectos');
+    const openCats = loadOpenMap(OPEN_PROJ_CATS_KEY);
+    const DIACRITICS_RE = new RegExp('[̀-ͯ]', 'g');
+    const norm = (s) => (s || '').toString().normalize('NFD').replace(DIACRITICS_RE, '').toLowerCase().trim();
+    const q = norm(proyectosBuscar);
+    const matches = (p) => {
+      if (!q) return true;
+      return norm(`${p.nombre} ${p.tipo || ''} ${p.grupoPadre || ''}`).includes(q);
+    };
+    let catIdx = 0;
     const porCat = state.categorias.map((cat) => {
-      const proys = state.proyectos.filter((p) => p.categoriaId === cat.id);
+      const proysCat = state.proyectos.filter((p) => p.categoriaId === cat.id);
+      const proys = proysCat.filter(matches);
+      if (!proysCat.length) return '';
+      if (q && !proys.length) return '';
+      // Con búsqueda activa, la categoría con resultados se muestra siempre abierta.
+      const isOpen = q ? true : (Object.prototype.hasOwnProperty.call(openCats, cat.id) ? openCats[cat.id] : catIdx === 0);
+      catIdx++;
       const items = proyectosGridHtml(proys) || '<div class="text-muted small px-2">Sin proyectos</div>';
-      return `<div class="mb-3"><div class="fw-semibold mb-2">${PF.esc(cat.nombre)}
-        <span class="text-muted small">(${proys.length})</span></div>
-        <div class="row g-2">${items}</div></div>`;
+      return `<div class="mb-3 proj-cat-group">
+        <div class="proj-cat-header" data-cat-toggle="${cat.id}" role="button" tabindex="0">
+          <i class="bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'}"></i>
+          <span class="fw-semibold">${PF.esc(cat.nombre)}</span>
+          <span class="text-muted small">(${proys.length}${q ? ' de ' + proysCat.length : ''})</span>
+        </div>
+        ${isOpen ? `<div class="row g-2 mt-1">${items}</div>` : ''}
+      </div>`;
     }).join('');
-    const sinCat = state.proyectos.filter((p) => !state.categorias.some((c) => c.id === p.categoriaId));
+    const sinCat = state.proyectos.filter((p) => !state.categorias.some((c) => c.id === p.categoriaId)).filter(matches);
     el.innerHTML = `
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <span class="text-muted">${state.proyectos.length} proyecto(s)</span>
+      <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div class="d-flex align-items-center gap-2">
+          <div class="input-group input-group-sm" style="width:260px">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="text" class="form-control" id="proj-search" placeholder="Buscar proyecto..." value="${PF.esc(proyectosBuscar)}">
+          </div>
+          <span class="text-muted small">${state.proyectos.length} proyecto(s)</span>
+        </div>
         ${isAdmin() ? '<button class="btn btn-sm btn-primary" id="btn-nuevo-proj"><i class="bi bi-plus-lg"></i> Nuevo proyecto</button>' : ''}
       </div>
-      ${porCat}
+      ${porCat || '<div class="text-muted small">Ningún proyecto coincide con la búsqueda.</div>'}
       ${sinCat.length ? `<div class="mb-3"><div class="fw-semibold mb-2 text-muted">Sin categoría</div>
         <div class="row g-2">${proyectosGridHtml(sinCat)}</div></div>` : ''}
       <div id="proj-detail"></div>`;
@@ -1742,6 +1784,23 @@
       saveOpenMap(OPEN_PROJ_GRUPOS_KEY, cur);
       renderProyectos();
     }));
+    el.querySelectorAll('[data-cat-toggle]').forEach((row) => {
+      const toggle = () => {
+        const id = row.dataset.catToggle;
+        const wasOpen = Object.prototype.hasOwnProperty.call(openCats, id) ? openCats[id] : false;
+        const cur = loadOpenMap(OPEN_PROJ_CATS_KEY);
+        cur[id] = !wasOpen;
+        saveOpenMap(OPEN_PROJ_CATS_KEY, cur);
+        renderProyectos();
+      };
+      row.addEventListener('click', toggle);
+      row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+    });
+    const searchEl = el.querySelector('#proj-search');
+    if (searchEl) {
+      searchEl.addEventListener('input', () => { proyectosBuscar = searchEl.value; renderProyectos(); });
+      if (proyectosBuscar) { searchEl.focus(); searchEl.setSelectionRange(searchEl.value.length, searchEl.value.length); }
+    }
   }
 
   function renderProyectoDetail(id) {
@@ -1757,7 +1816,7 @@
       <div class="panel">
         <div class="d-flex justify-content-between align-items-start">
           <div>
-            <h6 class="mb-1">${PF.esc(p.nombre)}</h6>
+            <h6 class="mb-1 d-flex align-items-center gap-2">${PF.esc(p.nombre)} ${estadoBadgeHtml(p.estado)}</h6>
             <span class="text-muted small">${PF.esc(categoriaNombre(p.categoriaId))} · ${p.moneda || state.config.moneda}
             ${p.tipo ? '· ' + PF.esc(p.tipo) : ''}
             ${p.grupoPadre ? '· grupo: ' + PF.esc(p.grupoPadre) : ''}
@@ -1826,6 +1885,11 @@
               <option value="UF" ${!proj || proj.moneda === 'UF' ? 'selected' : ''}>UF</option>
               <option value="CLP" ${proj && proj.moneda === 'CLP' ? 'selected' : ''}>CLP</option>
             </select></div>
+          <div class="mb-2"><label class="form-label small">Estado</label>
+            <select class="form-select" id="mp-estado">
+              <option value="" ${!proj || !proj.estado ? 'selected' : ''}>Sin definir</option>
+              ${ESTADOS_PROYECTO.map((e) => `<option value="${e.id}" ${proj && proj.estado === e.id ? 'selected' : ''}>${PF.esc(e.nombre)}</option>`).join('')}
+            </select></div>
         </div>
         <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
           <button class="btn btn-primary" id="mp-save">Guardar</button></div>
@@ -1840,6 +1904,7 @@
       const data = {
         nombre, categoriaId: wrap.querySelector('#mp-cat').value, moneda: wrap.querySelector('#mp-moneda').value,
         tipo: wrap.querySelector('#mp-tipo').value.trim(), grupoPadre: wrap.querySelector('#mp-grupo').value.trim() || null,
+        estado: wrap.querySelector('#mp-estado').value || null,
       };
       if (isEdit) await DB.updateProyecto(proj.id, data); else await DB.addProyecto(data);
       await loadAll(); modal.hide(); toast('Proyecto guardado', 'success'); renderProyectos();
@@ -2518,6 +2583,12 @@
     const el = document.getElementById('reportes');
     el.innerHTML = `
       <div class="panel">
+        <h6>PDF resumen para Directorio</h6>
+        <p class="text-muted small">Una página con lo esencial para la reunión: flujo por año, próximos aportes y
+          devoluciones, y cantidad de proyectos por estado (ejecución / evaluación / terminado).</p>
+        <button class="btn btn-outline-danger" id="rep-pdf-directorio"><i class="bi bi-file-earmark-pdf"></i> PDF Directorio</button>
+      </div>
+      <div class="panel">
         <h6>Exportar consolidado</h6>
         <p class="text-muted small">Descarga el flujo consolidado (mes a mes: neto, caja proyectada y caja real).</p>
         <button class="btn btn-outline-success me-2" id="rep-excel"><i class="bi bi-file-earmark-excel"></i> Excel</button>
@@ -2535,6 +2606,57 @@
           actuales de la app.</p>
         <button class="btn btn-outline-success" id="rep-master-excel"><i class="bi bi-file-earmark-excel"></i> Excel (formato maestro)</button>
       </div>`;
+
+    el.querySelector('#rep-pdf-directorio').addEventListener('click', () => {
+      const t = buildTimeline();
+      const months = t.months;
+      if (!months.length) { toast('No hay datos para generar el resumen', 'warning'); return; }
+
+      // ---- Flujo por año: neto del año y caja acumulada al cierre de cada año.
+      const buckets = periodBuckets(months, 'anual');
+      const flujoBody = buckets.map((b) => {
+        const net = b.months.reduce((a, m) => a + (t.net[m] || 0), 0);
+        const cierre = t.proj[b.months[b.months.length - 1]] || 0;
+        return [b.label, PF.fmtNum(net), PF.fmtNum(cierre)];
+      });
+
+      // ---- Próximos aportes y devoluciones: movimientos desde el mes actual, los más grandes primero.
+      const cur = PF.currentMonth();
+      const futMonths = months.filter((m) => m >= cur);
+      const movimientos = [];
+      futMonths.forEach((m) => {
+        state.proyectos.forEach((p) => {
+          const v = (p.proyeccion || {})[m] || 0;
+          if (v !== 0) movimientos.push({ mes: m, nombre: p.nombre, v });
+        });
+      });
+      const proximosBody = movimientos
+        .sort((a, b) => Math.abs(b.v) - Math.abs(a.v))
+        .slice(0, 14)
+        .map((x) => [PF.monthLabel(x.mes), x.nombre, x.v > 0 ? 'Devolución' : 'Aporte', PF.fmtNum(Math.abs(x.v))]);
+
+      // ---- Cantidad de proyectos por estado (columna "Estado" en Por proyecto).
+      const countEstado = (id) => state.proyectos.filter((p) => p.estado === id).length;
+      const sinEstado = state.proyectos.filter((p) => !p.estado).length;
+      const estadoBody = ESTADOS_PROYECTO.map((e) => [e.nombre, countEstado(e.id)])
+        .concat(sinEstado ? [['Sin definir', sinEstado]] : []);
+
+      PFReports.exportPDF({
+        title: 'Resumen Directorio',
+        subtitle: `Generado el ${new Date().toLocaleDateString('es-CL', { day: '2-digit', month: 'long', year: 'numeric' })} · Caja inicial ${PF.fmtMoney(state.config.cajaInicial)}`,
+        kpis: [
+          { label: 'Caja proyectada al cierre', value: PF.fmtNum(t.proj[months[months.length - 1]] || 0) + ' UF', accent: '#2563eb' },
+          { label: 'Mínimo de caja proyectado', value: PF.fmtNum(t.minAcc) + ' UF', accent: '#dc2626' },
+          { label: 'Proyectos en ejecución', value: String(countEstado('ejecucion')), accent: '#2563eb' },
+          { label: 'Proyectos en evaluación', value: String(countEstado('evaluacion')), accent: '#b45309' },
+        ],
+        sections: [
+          { heading: 'Flujo proyectado por año', head: ['Año', 'Flujo neto (UF)', 'Caja acumulada al cierre (UF)'], body: flujoBody },
+          { heading: 'Próximos aportes y devoluciones (mayores montos)', head: ['Mes', 'Proyecto', 'Tipo', 'Monto (UF)'], body: proximosBody.length ? proximosBody : [['—', 'Sin movimientos futuros', '', '']] },
+          { heading: 'Proyectos por estado', head: ['Estado', 'Cantidad'], body: estadoBody },
+        ],
+      });
+    });
 
     el.querySelector('#rep-excel').addEventListener('click', () => {
       const t = buildTimeline();
