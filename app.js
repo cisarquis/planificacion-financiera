@@ -309,6 +309,12 @@
     });
   }
 
+  // Años marcados para mostrar en los 2 gráficos de Consolidado (vacío = todos). Es solo una
+  // ventana de visualización — recorta qué meses/trimestres se dibujan, pero no recalcula nada
+  // (KPIs y alertas siguen viendo el horizonte completo, porque son advertencias reales, no una
+  // vista editable).
+  let dashYearFilter = new Set();
+
   function renderDashboard() {
     const el = document.getElementById('dashboard');
     if (!state.proyectos.length) { el.innerHTML = emptyState('No hay proyectos todavía', 'Importa un Excel para comenzar (menú "Importar Excel").'); return; }
@@ -419,17 +425,27 @@
     hitos.sort((a, b) => a.v - b.v);
     const topHitos = hitos.slice(0, 3);
 
-    const labels = t.months.map(PF.monthLabel);
-    const years = t.months.map((m) => m.slice(0, 4));
-    const projArr = t.months.map((m) => t.proj[m]);
-    const realArr = t.months.map((m) => (t.real[m] != null ? t.real[m] : null));
+    const allYearsInData = Array.from(new Set(t.months.map((m) => m.slice(0, 4))));
+    const yearKeep = (y) => !dashYearFilter.size || dashYearFilter.has(y);
+
+    const monthsShown = t.months.filter((m) => yearKeep(m.slice(0, 4)));
+    const labels = monthsShown.map(PF.monthLabel);
+    const years = monthsShown.map((m) => m.slice(0, 4));
+    const projArr = monthsShown.map((m) => t.proj[m]);
+    const realArr = monthsShown.map((m) => (t.real[m] != null ? t.real[m] : null));
 
     // Flujo neto: se agrega a trimestre (60 barras mensuales no se leen); reutiliza
     // periodBuckets, igual que Resumen Directorio.
-    const qBuckets = periodBuckets(t.months, 'trimestral');
+    const qBuckets = periodBuckets(t.months, 'trimestral').filter((b) => yearKeep(b.months[0].slice(0, 4)));
     const qLabels = qBuckets.map((b) => b.label);
     const qYears = qBuckets.map((b) => b.months[0].slice(0, 4));
     const qNet = qBuckets.map((b) => b.months.reduce((s, m) => s + (t.net[m] || 0), 0));
+
+    const dashYearChipsHtml = allYearsInData.length > 1 ? `<div class="dash-year-chips">
+      <span class="text-muted small me-1">Años:</span>
+      <button type="button" class="dash-year-chip ${!dashYearFilter.size ? 'active' : ''}" data-year="">Todos</button>
+      ${allYearsInData.map((y) => `<button type="button" class="dash-year-chip ${dashYearFilter.has(y) ? 'active' : ''}" data-year="${y}">${y}</button>`).join('')}
+    </div>` : '';
 
     el.innerHTML = `
       ${verdictHtml}
@@ -442,11 +458,12 @@
             ${kpi2Card('Neto del horizonte', netoHorizonte, 'Cierre proyectado ' + PF.fmtNum(cierreProyectado) + ' UF', '#16a34a', 'var(--pf-slate-800)', true)}
           </div>
 
+          ${dashYearChipsHtml}
           <div class="panel">
             <div class="panel-header-row">
               <div>
                 <h3>Caja acumulada: proyectada vs. real</h3>
-                <p class="panel-hint">Caja inicial ${PF.fmtNum(state.config.cajaInicial)} UF · ${t.months.length} meses, en UF</p>
+                <p class="panel-hint">Caja inicial ${PF.fmtNum(state.config.cajaInicial)} UF · ${monthsShown.length} de ${t.months.length} meses, en UF</p>
               </div>
               <div class="chart-legend">
                 <span class="chart-legend-item"><span class="swatch-line" style="background:#2563eb"></span>Proyectada</span>
@@ -454,7 +471,7 @@
                 <span class="chart-legend-item"><span class="swatch-box" style="background:#fee2e2; border:1px solid #fecaca"></span>Caja negativa</span>
               </div>
             </div>
-            ${PFCharts.svgCajaAcumulada(labels, projArr, realArr, years)}
+            ${monthsShown.length ? PFCharts.svgCajaAcumulada(labels, projArr, realArr, years) : '<div class="text-muted">Ningún mes en los años elegidos.</div>'}
           </div>
 
           <div class="panel mb-0">
@@ -468,7 +485,7 @@
                 <span class="chart-legend-item"><span class="swatch-sq" style="background:#dc2626"></span>Aportes</span>
               </div>
             </div>
-            ${PFCharts.svgFlujoNeto(qLabels, qNet, qYears)}
+            ${qBuckets.length ? PFCharts.svgFlujoNeto(qLabels, qNet, qYears) : '<div class="text-muted">Ningún trimestre en los años elegidos.</div>'}
           </div>
         </div>
 
@@ -491,6 +508,11 @@
       </div>`;
 
     el.querySelectorAll('[data-goto]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); showView(a.dataset.goto); }));
+    el.querySelectorAll('.dash-year-chip').forEach((btn) => btn.addEventListener('click', () => {
+      const y = btn.dataset.year;
+      if (!y) { dashYearFilter = new Set(); } else if (dashYearFilter.has(y)) { dashYearFilter.delete(y); } else { dashYearFilter.add(y); }
+      renderDashboard();
+    }));
     wireChartHoverTips(el);
   }
 
@@ -1045,19 +1067,7 @@
     const acumActual = []; let accA = 0; totalActual.forEach((v) => { accA += v; acumActual.push(accA); });
     const acumPpto = []; let accP = 0; totalPpto.forEach((v) => { accP += v; acumPpto.push(accP); });
 
-    // periodBorder/filaHtml/headCols/subCols: formato "3 columnas por período" (Ppto/Actual/Var),
-    // usado por la tabla de Flujo de Obras más abajo (sin cambios respecto a la sesión anterior).
     const periodBorder = 'border-left:2px solid var(--pf-border)';
-    function filaHtml(nombre, actualArr, pptoArr, cls) {
-      const cells = buckets.map((b, i) => {
-        const a = actualArr[i], p = pptoArr[i], v = a - p;
-        const bs = i > 0 ? periodBorder : '';
-        return `<td class="num" style="${bs}">${PF.fmtNum(p)}</td><td class="num">${PF.fmtNum(a)}</td><td class="num ${v < 0 ? 'neg' : 'pos'}">${PF.fmtNum(v)}</td>`;
-      }).join('');
-      return `<tr class="${cls || ''}"><td class="proj-col">${PF.esc(nombre)}</td>${cells}</tr>`;
-    }
-    const headCols = buckets.map((b, i) => `<th class="num" colspan="3" style="${i > 0 ? periodBorder : ''}">${PF.esc(b.label)}</th>`).join('');
-    const subCols = buckets.map((b, i) => `<th class="num small text-muted" style="${i > 0 ? periodBorder : ''}">Ppto</th><th class="num small text-muted">Actual</th><th class="num small text-muted">Var</th>`).join('');
 
     // ---- Tabla por categoría (rediseñada): 1 columna por período sin presupuesto, 2 con
     // presupuesto (Actual, Δ) — nunca 3, y nunca "0 UF" (se muestra "—").
@@ -1168,9 +1178,13 @@
       const dCls = d > 0 ? 'pos' : (d < 0 ? 'neg' : 'num-zero');
       return `<td class="num" style="text-align:center; ${bs}"><span class="${dCls}">${dTxt}</span></td>`;
     }
-    function dirNumCells(actualArr, deltaArr, isAcum) {
+    // `bucketList` es opcional (default `buckets`, la granularidad elegida arriba) — lo usan
+    // también la tabla de Obras y la de Actual/Ppto/Desviación, que siempre trabajan en anual
+    // (`obraAnualBuckets`), para compartir el mismo look de 2 columnas (Actual, Δ) centradas.
+    function dirNumCells(actualArr, deltaArr, isAcum, bucketList) {
+      bucketList = bucketList || buckets;
       const maxAcum = Math.max(...actualArr.map((v) => Math.abs(v)), 1);
-      const actualsHtml = buckets.map((b, i) => {
+      const actualsHtml = bucketList.map((b, i) => {
         const a = actualArr[i];
         const bs = i > 0 ? periodBorder : '';
         if (isAcum) {
@@ -1181,34 +1195,59 @@
         return dirActualTd(a, cls, bs);
       }).join('');
       const deltasHtml = deltaArr
-        ? buckets.map((b, i) => dirDeltaTd(deltaArr[i], i === 0 ? dirGroupGap : periodBorder)).join('')
+        ? bucketList.map((b, i) => dirDeltaTd(deltaArr[i], i === 0 ? dirGroupGap : periodBorder)).join('')
         : '';
       return actualsHtml + deltasHtml;
     }
+    // opts.catId: fila de categoría (tabla "por categoría"), toggle propio vía OPEN_DIR_CATS_KEY.
+    // opts.grupo: fila de grupo de obra (tabla "Flujo de Obras"), mismo markup/toggle/drag&drop
+    // que ya tenía esa tabla (clase `.cat-row[data-grupo]`, wireada más abajo) — no se reemplaza
+    // por el mecanismo de opts.catId porque son 2 estados de apertura y 2 comportamientos
+    // distintos (esta además acepta soltar una fila de proyecto arrastrada encima).
     function dirRowHtml(nombre, icon, actualArr, deltaArr, opts) {
       opts = opts || {};
       const rowBg = opts.rowBg || '#fff';
       const isCat = !!opts.catId;
-      const isOpen = isCat && (Object.prototype.hasOwnProperty.call(openDirCats, opts.catId) ? openDirCats[opts.catId] : false);
-      const labelHtml = isCat
-        ? `<span class="row-label"><i class="bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'}"></i><i class="bi ${icon}"></i><span>${PF.esc(nombre)}</span></span>`
+      const isGrupo = !!opts.grupo;
+      const isOpen = isCat
+        ? (Object.prototype.hasOwnProperty.call(openDirCats, opts.catId) ? openDirCats[opts.catId] : false)
+        : !!opts.grupoOpen;
+      const labelHtml = (isCat || isGrupo)
+        ? `<span class="row-label"><i class="bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'}"></i>${isGrupo ? '' : `<i class="bi ${icon}"></i>`}<span>${PF.esc(nombre)}</span></span>`
         : `<span class="row-label"><i class="bi ${icon}"></i><span>${PF.esc(nombre)}</span></span>`;
-      return `<tr style="background:${rowBg}" ${isCat ? `class="dir-cat-row" data-catid="${PF.esc(opts.catId)}" role="button" tabindex="0"` : ''}>
+      const rowAttrs = isCat
+        ? `class="dir-cat-row" data-catid="${PF.esc(opts.catId)}" role="button" tabindex="0"`
+        : (isGrupo ? `class="cat-row" data-grupo="${PF.esc(opts.grupo)}" data-is-open="${isOpen}" role="button" tabindex="0"` : '');
+      return `<tr style="background:${rowBg}" ${rowAttrs}>
         <td class="proj-col" style="background:${rowBg}; font-weight:${opts.weight || 500}; color:${opts.labelColor || 'var(--pf-slate-700)'}">
           ${labelHtml}
         </td>
-        ${dirNumCells(actualArr, deltaArr, !!opts.isAcum)}
+        ${dirNumCells(actualArr, deltaArr, !!opts.isAcum, opts.buckets)}
         <td class="trend-col">${PFCharts.sparkline(actualArr)}</td>
       </tr>`;
     }
-    function dirProjRowHtml(nombre, actualArr, deltaArr) {
+    // opts.projId: fila de proyecto dentro de un grupo de obra — arrastrable para reclasificar
+    // (mismo comportamiento que tenía antes esa tabla). Sin projId: detalle dentro de una
+    // categoría (tabla "por categoría"), solo lectura.
+    function dirProjRowHtml(nombre, actualArr, deltaArr, bucketList, opts) {
+      opts = opts || {};
+      if (opts.projId) {
+        return `<tr class="proj-row" ${isAdmin() ? 'draggable="true"' : ''} data-proj-id="${opts.projId}">
+          <td class="proj-col"><span class="row-label" style="padding-left:14px; ${isAdmin() ? 'cursor:grab' : ''}"><i class="bi bi-dot"></i><span>${PF.esc(nombre)}</span></span></td>
+          ${dirNumCells(actualArr, deltaArr, false, bucketList)}
+          <td class="trend-col">${PFCharts.sparkline(actualArr)}</td>
+        </tr>`;
+      }
       return `<tr class="dir-proj-row">
         <td class="proj-col" style="padding-left:34px; font-weight:400; color:var(--pf-slate-500)">
           <span class="row-label"><i class="bi bi-dot"></i><span>${PF.esc(nombre)}</span></span>
         </td>
-        ${dirNumCells(actualArr, deltaArr, false)}
+        ${dirNumCells(actualArr, deltaArr, false, bucketList)}
         <td class="trend-col">${PFCharts.sparkline(actualArr)}</td>
       </tr>`;
+    }
+    function dirHeadRow(bucketList, labelCol) {
+      return `<tr><th class="proj-col">${labelCol}</th>${bucketList.map((b, i) => `<th class="num" style="min-width:${dirColW}; text-align:center; ${i > 0 ? periodBorder : ''}">${PF.esc(b.label)}</th>`).join('')}${bucketList.map((b, i) => `<th class="num small text-muted" style="text-align:center; ${i === 0 ? dirGroupGap : periodBorder}">Δ ${PF.esc(b.label)}</th>`).join('')}<th class="trend-col">Tendencia</th></tr>`;
     }
     const openDirCats = loadOpenMap(OPEN_DIR_CATS_KEY);
     const dirRowsHtml = catFilas.map((f) => {
@@ -1314,57 +1353,29 @@
     const tablaObraAcumActual = []; let accTA = cajaInicialCfg; tablaObraTotalActual.forEach((v) => { accTA += v; tablaObraAcumActual.push(accTA); });
     const tablaObraAcumPpto = []; let accTP = cajaInicialCfg; tablaObraTotalPpto.forEach((v) => { accTP += v; tablaObraAcumPpto.push(accTP); });
 
-    function obraTablaCeldas(actual, ppto) {
-      // Colores en línea (no clases) para que el signo de Actual y el semáforo de Δ se
-      // vean igual dentro de las filas totales, que tienen su propio fondo por CSS.
-      return obraAnualBuckets.map((_, i) => {
-        const a = actual[i], p = ppto[i], d = a - p;
-        const aTxt = a === 0 ? '—' : PF.fmtNum(a);
-        const pTxt = p === 0 ? '—' : PF.fmtNum(p);
-        const dTxt = d === 0 ? '—' : (d > 0 ? '+' : '') + PF.fmtNum(d);
-        const aColor = a < 0 ? 'var(--pf-danger-700)' : (a > 0 ? 'var(--pf-success-700)' : 'var(--pf-slate-300)');
-        const dBg = d > 0 ? 'var(--pf-success-100)' : (d < 0 ? 'var(--pf-danger-100)' : 'transparent');
-        const dColor = d < 0 ? 'var(--pf-danger-700)' : 'var(--pf-slate-800)';
-        return `<td class="num" style="color:${aColor}">${aTxt}</td><td class="num">${pTxt}</td><td class="num" style="background:${dBg}; color:${dColor}">${dTxt}</td>`;
-      }).join('');
-    }
+    const obraDeltaOf = (actualArr, pptoArr) => actualArr.map((a, i) => a - pptoArr[i]);
     const lineasTablaObraHtml = lineasTablaObra.map((l) =>
-      `<tr><td class="proj-col">${PF.esc(l.nombre)}</td>${obraTablaCeldas(l.actual, l.ppto)}</tr>`).join('');
-    const tablaObraTotalRow = `<tr class="total-row"><td class="proj-col">Flujo de caja</td>${obraTablaCeldas(tablaObraTotalActual, tablaObraTotalPpto)}</tr>`;
-    const tablaObraAcumRow = `<tr class="total-row"><td class="proj-col">Flujo de caja acumulado</td>${obraTablaCeldas(tablaObraAcumActual, tablaObraAcumPpto)}</tr>`;
-    const tablaObraHeadAnios = `<tr><th class="proj-col"></th>${obraAnualLabels.map((l) => `<th class="num" colspan="3">${PF.esc(l)}</th>`).join('')}</tr>`;
-    const tablaObraHeadCols = `<tr><th class="proj-col">Concepto</th>${obraAnualLabels.map(() => '<th class="num small text-muted">Actual</th><th class="num small text-muted">Ppto</th><th class="num small text-muted">Δ</th>').join('')}</tr>`;
+      dirRowHtml(l.nombre, 'bi-diagram-2', l.actual, obraDeltaOf(l.actual, l.ppto), { buckets: obraAnualBuckets })).join('');
+    const tablaObraTotalRow = dirRowHtml('Flujo de caja', 'bi-arrow-left-right', tablaObraTotalActual, obraDeltaOf(tablaObraTotalActual, tablaObraTotalPpto),
+      { buckets: obraAnualBuckets, weight: 700, labelColor: 'var(--pf-slate-800)', rowBg: '#eff6ff' });
+    const tablaObraAcumRow = dirRowHtml('Flujo de caja acumulado', 'bi-wallet2', tablaObraAcumActual, obraDeltaOf(tablaObraAcumActual, tablaObraAcumPpto),
+      { buckets: obraAnualBuckets, weight: 700, labelColor: 'var(--pf-slate-800)', isAcum: true });
+    const tablaObraHead = dirHeadRow(obraAnualBuckets, 'Concepto');
 
     let obraIdx = 0;
     const obraRowsHtml = filasObra.map((f) => {
       const isOpen = Object.prototype.hasOwnProperty.call(openGrupos, f.grupo) ? openGrupos[f.grupo] : obraIdx === 0;
       obraIdx++;
-      const cells = buckets.map((b, i) => {
-        const a = f.actual[i], p = f.ppto[i], v = a - p;
-        const bs = i > 0 ? periodBorder : '';
-        return `<td class="num" style="${bs}">${PF.fmtNum(p)}</td><td class="num">${PF.fmtNum(a)}</td><td class="num ${v < 0 ? 'neg' : 'pos'}">${PF.fmtNum(v)}</td>`;
-      }).join('');
-      const grupoRow = `<tr class="cat-row" data-grupo="${PF.esc(f.grupo)}" data-is-open="${isOpen}" role="button" tabindex="0">
-        <td class="proj-col"><span class="row-label"><i class="bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'}"></i><span>${PF.esc(f.grupo)}</span></span></td>
-        ${cells}
-      </tr>`;
+      const grupoRow = dirRowHtml(f.grupo, 'bi-diagram-2', f.actual, obraDeltaOf(f.actual, f.ppto), { grupo: f.grupo, grupoOpen: isOpen });
       const proyRows = isOpen ? f.proys.map((p) => {
         const pActual = buckets.map((b) => sumField([p], b.months, 'proyeccion'));
         const pPpto = buckets.map((b) => sumField([p], b.months, 'presupuesto'));
-        const pCells = buckets.map((b, i) => {
-          const a = pActual[i], pp = pPpto[i], v = a - pp;
-          const bs = i > 0 ? periodBorder : '';
-          return `<td class="num" style="${bs}">${PF.fmtNum(pp)}</td><td class="num">${PF.fmtNum(a)}</td><td class="num ${v < 0 ? 'neg' : 'pos'}">${PF.fmtNum(v)}</td>`;
-        }).join('');
-        return `<tr class="proj-row" ${isAdmin() ? 'draggable="true"' : ''} data-proj-id="${p.id}">
-          <td class="proj-col"><span class="row-label" style="padding-left:14px; ${isAdmin() ? 'cursor:grab' : ''}"><i class="bi bi-dot"></i><span>${PF.esc(p.nombre)}</span></span></td>
-          ${pCells}
-        </tr>`;
+        return dirProjRowHtml(p.nombre, pActual, obraDeltaOf(pActual, pPpto), buckets, { projId: p.id });
       }).join('') : '';
       return grupoRow + proyRows;
     }).join('');
-    const obraTotalRow = filaHtml('Flujo de caja (obra)', totalActualObra, totalPptoObra, 'table-light');
-    const obraAcumRow = filaHtml('Flujo acumulado (obra)', acumActualObra, acumPptoObra, 'table-light');
+    const obraTotalRow = dirRowHtml('Flujo de caja (obra)', 'bi-arrow-left-right', totalActualObra, obraDeltaOf(totalActualObra, totalPptoObra), { weight: 700, labelColor: 'var(--pf-slate-800)', rowBg: '#eff6ff' });
+    const obraAcumRow = dirRowHtml('Flujo acumulado (obra)', 'bi-wallet2', acumActualObra, obraDeltaOf(acumActualObra, acumPptoObra), { weight: 700, labelColor: 'var(--pf-slate-800)', isAcum: true });
 
     el.innerHTML = `
       ${verdictHtml}
@@ -1414,10 +1425,7 @@
         ${!buckets.length ? '<div class="text-muted">No hay meses con datos.</div>' : `
         <div class="flujo-table-wrap table-sticky-col flujo-scroll obra-table">
           <table class="flujo-table">
-            <thead>
-              <tr><th class="proj-col"></th>${headCols}</tr>
-              <tr><th class="proj-col">Grupo / Proyecto</th>${subCols}</tr>
-            </thead>
+            <thead>${dirHeadRow(buckets, 'Grupo / Proyecto')}</thead>
             <tbody>${obraRowsHtml}${obraTotalRow}${obraAcumRow}</tbody>
           </table>
         </div>`}
@@ -1461,7 +1469,7 @@
         ${obraAnualLabels.length ? `
         <div class="flujo-table-wrap table-sticky-col flujo-scroll">
           <table class="flujo-table">
-            <thead>${tablaObraHeadAnios}${tablaObraHeadCols}</thead>
+            <thead>${tablaObraHead}</thead>
             <tbody>${lineasTablaObraHtml}${tablaObraTotalRow}${tablaObraAcumRow}</tbody>
           </table>
         </div>` : '<div class="text-muted">No hay períodos en ese rango de años.</div>'}

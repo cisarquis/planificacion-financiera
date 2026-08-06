@@ -376,6 +376,16 @@ body {
 .proj-cat-header:hover { background: var(--pf-slate-50); }
 .proj-cat-header i.bi { color: var(--pf-slate-400); font-size: 12px; }
 
+/* ---------- Consolidado: selector de años para los 2 gráficos ---------- */
+.dash-year-chips { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.dash-year-chip {
+  padding: 4px 12px; border-radius: var(--pf-radius-pill); border: 1px solid var(--pf-border);
+  background: #fff; color: var(--pf-slate-600); font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.dash-year-chip:hover { border-color: var(--pf-slate-300); }
+.dash-year-chip.active { background: var(--pf-primary); border-color: var(--pf-primary); color: #fff; }
+
 .dir-cat-row { cursor: pointer; }
 .dir-cat-row:hover { background: var(--pf-slate-50) !important; }
 .dir-cat-row .row-label { gap: 5px; }
