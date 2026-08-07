@@ -1902,8 +1902,7 @@
       </div>
       ${porCat || '<div class="text-muted small">Ningún proyecto coincide con el filtro.</div>'}
       ${sinCat.length ? `<div class="mb-3"><div class="fw-semibold mb-2 text-muted">Sin categoría</div>
-        <div class="row g-2">${proyectosGridHtml(sinCat)}</div></div>` : ''}
-      <div id="proj-detail"></div>`;
+        <div class="row g-2">${proyectosGridHtml(sinCat)}</div></div>` : ''}`;
 
     if (isAdmin()) document.getElementById('btn-nuevo-proj').addEventListener('click', () => nuevoProyectoDialog());
     el.querySelectorAll('[data-estado-filtro]').forEach((btn) => btn.addEventListener('click', () => {
@@ -1937,36 +1936,49 @@
     }
   }
 
+  // Detalle de proyecto en un modal (antes se insertaba al final de la página y había que
+  // desplazarse hasta abajo para verlo, y de nuevo hacia arriba para volver a la grilla) — el
+  // modal se abre encima, sin mover el scroll ni perder la posición en la grilla de tarjetas.
   function renderProyectoDetail(id) {
     state.currentProyectoId = id;
     const p = state.proyectos.find((x) => x.id === id);
-    const box = document.getElementById('proj-detail');
-    if (!p) { box.innerHTML = ''; return; }
+    if (!p) return;
     const months = allMonths([p]);
     const net = {}; months.forEach((m) => { net[m] = (p.proyeccion || {})[m] || 0; });
     const proj = (() => { let acc = 0; const o = {}; months.forEach((m) => { acc += net[m]; o[m] = acc; }); return o; })();
+    const stats = flowStats(p.proyeccion);
 
-    box.innerHTML = `
-      <div class="panel">
-        <div class="d-flex justify-content-between align-items-start">
+    const html = `
+      <div class="modal fade" tabindex="-1" id="proj-detail-modal"><div class="modal-dialog modal-lg modal-dialog-centered"><div class="modal-content">
+        <div class="modal-header">
           <div>
-            <h6 class="mb-1 d-flex align-items-center gap-2">${PF.esc(p.nombre)} ${estadoBadgeHtml(p.estado)}</h6>
+            <h5 class="modal-title mb-1 d-flex align-items-center gap-2">${PF.esc(p.nombre)} ${estadoBadgeHtml(p.estado)}</h5>
             <span class="text-muted small">${PF.esc(categoriaNombre(p.categoriaId))} · ${p.moneda || state.config.moneda}
             ${p.tipo ? '· ' + PF.esc(p.tipo) : ''}
             ${p.grupoPadre ? '· grupo: ' + PF.esc(p.grupoPadre) : ''}
             ${p.ultimaImportacion ? '· última importación: ' + PF.esc(p.ultimaImportacion.fileName || '') : ''}</span>
           </div>
-          <div>
-            ${isAdmin() ? `<button class="btn btn-sm btn-outline-secondary" id="btn-edit-proj"><i class="bi bi-pencil"></i></button>
-            <button class="btn btn-sm btn-outline-danger" id="btn-del-proj"><i class="bi bi-trash"></i></button>` : ''}
-          </div>
+          <button class="btn-close" data-bs-dismiss="modal"></button>
         </div>
-        <div class="chart-box mt-3"><canvas id="chart-proj-detail"></canvas></div>
-      </div>`;
+        <div class="modal-body">
+          ${statsRowsHtml(stats, p.moneda)}
+          <div class="chart-box mt-3"><canvas id="chart-proj-detail"></canvas></div>
+        </div>
+        <div class="modal-footer">
+          ${isAdmin() ? `<button class="btn btn-outline-danger me-auto" id="btn-del-proj"><i class="bi bi-trash"></i> Eliminar</button>
+          <button class="btn btn-outline-secondary" id="btn-edit-proj"><i class="bi bi-pencil"></i> Editar</button>` : ''}
+          <button class="btn btn-primary" data-bs-dismiss="modal">Cerrar</button>
+        </div>
+      </div></div></div>`;
+    const wrap = document.createElement('div'); wrap.innerHTML = html; document.body.appendChild(wrap);
+    const modalEl = wrap.querySelector('#proj-detail-modal');
+    const modal = new bootstrap.Modal(modalEl);
+    modal.show();
+    modalEl.addEventListener('hidden.bs.modal', () => wrap.remove());
 
     const labels = months.map(PF.monthLabel);
     PFCharts.destroy('chart-proj-detail');
-    const c = document.getElementById('chart-proj-detail').getContext('2d');
+    const c = wrap.querySelector('#chart-proj-detail').getContext('2d');
     new Chart(c, {
       data: {
         labels,
@@ -1982,13 +1994,12 @@
         scales: { y: { ticks: { callback: PF.fmtNum } } } },
     });
     if (isAdmin()) {
-      document.getElementById('btn-edit-proj').addEventListener('click', () => nuevoProyectoDialog(p));
-      document.getElementById('btn-del-proj').addEventListener('click', async () => {
+      wrap.querySelector('#btn-edit-proj').addEventListener('click', () => { modal.hide(); nuevoProyectoDialog(p); });
+      wrap.querySelector('#btn-del-proj').addEventListener('click', async () => {
         if (!confirm(`¿Eliminar el proyecto "${p.nombre}"? Esto borra su proyección.`)) return;
-        await DB.deleteProyecto(p.id); await loadAll(); toast('Proyecto eliminado', 'danger'); renderProyectos();
+        await DB.deleteProyecto(p.id); await loadAll(); toast('Proyecto eliminado', 'danger'); modal.hide(); renderProyectos();
       });
     }
-    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
   // Diálogo crear/editar proyecto (usa prompt simple con modal Bootstrap).
