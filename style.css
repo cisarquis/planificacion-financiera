@@ -386,12 +386,15 @@ body {
 .dash-year-chip:hover { border-color: var(--pf-slate-300); }
 .dash-year-chip.active { background: var(--pf-primary); border-color: var(--pf-primary); color: #fff; }
 
-.dir-delta-block { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--pf-border); }
-.dir-delta-title {
+.dir-delta-block { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--pf-border); }
+.dir-delta-toggle {
   display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700;
-  color: var(--pf-slate-600); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 8px;
+  color: var(--pf-slate-600); text-transform: uppercase; letter-spacing: .4px;
+  background: none; border: none; padding: 4px 2px; cursor: pointer;
 }
-.dir-delta-title .bi { color: var(--pf-primary); }
+.dir-delta-toggle:hover { color: var(--pf-primary); }
+.dir-delta-toggle .bi-arrow-left-right { color: var(--pf-primary); }
+.dir-delta-block .flujo-table-wrap { margin-top: 10px; }
 
 .dir-cat-row { cursor: pointer; }
 .dir-cat-row:hover { background: var(--pf-slate-50) !important; }

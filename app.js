@@ -952,6 +952,7 @@
   })();
   const OPEN_GRUPOS_KEY = 'pf.resumen.openGrupos';
   const OPEN_DIR_CATS_KEY = 'pf.resumen.openDirCats';
+  const OPEN_DIR_DELTA_KEY = 'pf.resumen.openDirDelta';
   // Versión guardada activa para comparar en "Flujo de caja por categoría" (null = sin comparar).
   let resumenCompareSnapshot = null;
   // Listado de versiones guardadas para el selector; null = todavía no se cargó.
@@ -1230,7 +1231,7 @@
           ${labelHtml}
         </td>
         ${dirNumCells(actualArr, deltaArr, !!opts.isAcum, opts.buckets, mode)}
-        ${mode === 'delta' ? '' : `<td class="trend-col">${PFCharts.sparkline(actualArr)}</td>`}
+        <td class="trend-col">${mode === 'delta' ? '' : PFCharts.sparkline(actualArr)}</td>
       </tr>`;
     }
     // opts.projId: fila de proyecto dentro de un grupo de obra — arrastrable para reclasificar
@@ -1239,7 +1240,7 @@
     function dirProjRowHtml(nombre, actualArr, deltaArr, bucketList, opts) {
       opts = opts || {};
       const mode = opts.mode || 'both';
-      const trendTd = mode === 'delta' ? '' : `<td class="trend-col">${PFCharts.sparkline(actualArr)}</td>`;
+      const trendTd = `<td class="trend-col">${mode === 'delta' ? '' : PFCharts.sparkline(actualArr)}</td>`;
       if (opts.projId) {
         return `<tr class="proj-row" ${isAdmin() ? 'draggable="true"' : ''} data-proj-id="${opts.projId}">
           <td class="proj-col"><span class="row-label" style="padding-left:14px; ${isAdmin() ? 'cursor:grab' : ''}"><i class="bi bi-dot"></i><span>${PF.esc(nombre)}</span></span></td>
@@ -1256,18 +1257,24 @@
       </tr>`;
     }
     // mode: 'both' (año + Δ juntas), 'actual' (solo columnas de año) o 'delta' (solo columnas Δ,
-    // sin el hueco extra que las separaba cuando iban en la misma tabla que los años).
+    // sin el hueco extra que las separaba cuando iban en la misma tabla que los años). La
+    // columna de tendencia se mantiene (vacía) en modo 'delta' para que las 2 tablas midan
+    // exactamente lo mismo por columna y queden alineadas una debajo de la otra.
     function dirHeadRow(bucketList, labelCol, mode) {
       mode = mode || 'both';
       const yearsTh = mode === 'delta' ? '' : bucketList.map((b, i) => `<th class="num" style="min-width:${dirColW}; text-align:center; ${i > 0 ? periodBorder : ''}">${PF.esc(b.label)}</th>`).join('');
       const deltaTh = mode === 'actual' ? '' : bucketList.map((b, i) => `<th class="num small text-muted" style="text-align:center; ${mode === 'delta' ? (i > 0 ? periodBorder : '') : (i === 0 ? dirGroupGap : periodBorder)}">Δ ${PF.esc(b.label)}</th>`).join('');
-      const trendTh = mode === 'delta' ? '' : '<th class="trend-col">Tendencia</th>';
+      const trendTh = '<th class="trend-col">' + (mode === 'delta' ? '' : 'Tendencia') + '</th>';
       return `<tr><th class="proj-col">${labelCol}</th>${yearsTh}${deltaTh}${trendTh}</tr>`;
     }
+    const openDirDelta = loadOpenMap(OPEN_DIR_DELTA_KEY);
     // Arma el bloque de 2 tablas separadas — "Valores actuales" y "Variación (Δ)" — a pedido: el
     // grupo/proyecto siempre a la izquierda, los años en su propia tabla y las variaciones en la
     // suya, en vez de columnas Actual/Δ intercaladas en una sola tabla. Si no hay Δ que mostrar
-    // (sin presupuesto ni versión comparada), la segunda tabla ni se dibuja.
+    // (sin presupuesto ni versión comparada), el botón ni se dibuja. La de variaciones arranca
+    // escondida (colapsada) — se abre con el botón, y queda igual de ancha/alineada que la de
+    // arriba porque ambas comparten `wrapClass` y las mismas columnas (incluida "Tendencia",
+    // vacía en la de variaciones, solo para que el ancho de columnas calce entre las 2 tablas).
     function dirTablePairHtml(opts) {
       const wrapClass = `flujo-table-wrap table-sticky-col flujo-scroll${opts.wrapClass ? ' ' + opts.wrapClass : ''}`;
       const actualTable = `<div class="${wrapClass}" style="margin-top:14px">
@@ -1277,16 +1284,18 @@
         </table>
       </div>`;
       if (!opts.showDelta) return actualTable;
-      const deltaTable = `<div class="dir-delta-block">
-        <div class="dir-delta-title"><i class="bi bi-arrow-left-right"></i> Variación (Δ)</div>
-        <div class="${wrapClass}">
-          <table class="flujo-table">
-            <thead>${opts.headDelta}</thead>
-            <tbody>${opts.bodyDelta}</tbody>
-          </table>
-        </div>
-      </div>`;
-      return actualTable + deltaTable;
+      const isOpen = !!openDirDelta[opts.sectionKey];
+      const toggleBtn = `<button type="button" class="dir-delta-toggle" data-delta-toggle="${PF.esc(opts.sectionKey)}">
+        <i class="bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'}"></i>
+        <i class="bi bi-arrow-left-right"></i> Variación (Δ)
+      </button>`;
+      const deltaTable = isOpen ? `<div class="${wrapClass}">
+        <table class="flujo-table">
+          <thead>${opts.headDelta}</thead>
+          <tbody>${opts.bodyDelta}</tbody>
+        </table>
+      </div>` : '';
+      return actualTable + `<div class="dir-delta-block">${toggleBtn}${deltaTable}</div>`;
     }
     const openDirCats = loadOpenMap(OPEN_DIR_CATS_KEY);
     // Genera las filas de la tabla "por categoría" en un modo dado ('actual' o 'delta') — 2
@@ -1474,7 +1483,7 @@
         ${!buckets.length ? '<div class="text-muted">No hay meses con datos.</div>' : dirTablePairHtml({
           headActual: dirHeadHtml, bodyActual: dirRowsHtml + dirTotalAcumHtml,
           headDelta: dirDeltaHeadHtml, bodyDelta: dirDeltaRowsHtml + dirDeltaTotalAcumHtml,
-          showDelta: catHasDelta,
+          showDelta: catHasDelta, sectionKey: 'categoria',
         })}
         <div class="dir-footer-note">
           <i class="bi bi-info-circle"></i>
@@ -1489,7 +1498,7 @@
         ${!buckets.length ? '<div class="text-muted">No hay meses con datos.</div>' : dirTablePairHtml({
           headActual: obraHeadActual, bodyActual: obraRowsHtml,
           headDelta: obraHeadDelta, bodyDelta: obraRowsDeltaHtml,
-          showDelta: true, wrapClass: 'obra-table',
+          showDelta: true, wrapClass: 'obra-table', sectionKey: 'obras',
         })}
       </div>
       <div class="row g-3">
@@ -1531,7 +1540,7 @@
         ${obraAnualLabels.length ? dirTablePairHtml({
           headActual: tablaObraHeadActual, bodyActual: tablaObraBodyActual,
           headDelta: tablaObraHeadDelta, bodyDelta: tablaObraBodyDelta,
-          showDelta: true,
+          showDelta: true, sectionKey: 'obra-anual',
         }) : '<div class="text-muted">No hay períodos en ese rango de años.</div>'}
       </div>`;
 
@@ -1572,6 +1581,16 @@
         PFCharts.lineInversionAcumulada('chart-obra-acum', obraAnualLabels, obraNuevaAcumActual.map(Math.abs), obraNuevaAcumPpto.map(Math.abs));
       }
     }
+
+    el.querySelectorAll('[data-delta-toggle]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.deltaToggle;
+        const cur = loadOpenMap(OPEN_DIR_DELTA_KEY);
+        cur[key] = !openDirDelta[key];
+        saveOpenMap(OPEN_DIR_DELTA_KEY, cur);
+        renderResumenDirectorio();
+      });
+    });
 
     el.querySelectorAll('.cat-row[data-grupo]').forEach((row) => {
       const toggle = () => {
