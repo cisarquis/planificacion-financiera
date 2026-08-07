@@ -386,6 +386,13 @@ body {
 .dash-year-chip:hover { border-color: var(--pf-slate-300); }
 .dash-year-chip.active { background: var(--pf-primary); border-color: var(--pf-primary); color: #fff; }
 
+.dir-delta-block { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--pf-border); }
+.dir-delta-title {
+  display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700;
+  color: var(--pf-slate-600); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 8px;
+}
+.dir-delta-title .bi { color: var(--pf-primary); }
+
 .dir-cat-row { cursor: pointer; }
 .dir-cat-row:hover { background: var(--pf-slate-50) !important; }
 .dir-cat-row .row-label { gap: 5px; }

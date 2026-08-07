@@ -1181,10 +1181,15 @@
     // `bucketList` es opcional (default `buckets`, la granularidad elegida arriba) — lo usan
     // también la tabla de Obras y la de Actual/Ppto/Desviación, que siempre trabajan en anual
     // (`obraAnualBuckets`), para compartir el mismo look de 2 columnas (Actual, Δ) centradas.
-    function dirNumCells(actualArr, deltaArr, isAcum, bucketList) {
+    // `mode`: 'both' (default, cols de años seguidas de cols de Δ en la misma tabla),
+    // 'actual' (solo años — para la tabla separada de valores) o 'delta' (solo Δ — para la
+    // tabla separada de variaciones, sin el hueco/borde extra que separaba los 2 bloques
+    // cuando iban juntos).
+    function dirNumCells(actualArr, deltaArr, isAcum, bucketList, mode) {
+      mode = mode || 'both';
       bucketList = bucketList || buckets;
       const maxAcum = Math.max(...actualArr.map((v) => Math.abs(v)), 1);
-      const actualsHtml = bucketList.map((b, i) => {
+      const actualsHtml = mode === 'delta' ? '' : bucketList.map((b, i) => {
         const a = actualArr[i];
         const bs = i > 0 ? periodBorder : '';
         if (isAcum) {
@@ -1194,9 +1199,10 @@
         const cls = a < 0 ? 'neg' : (a > 0 ? 'pos' : 'num-zero');
         return dirActualTd(a, cls, bs);
       }).join('');
-      const deltasHtml = deltaArr
-        ? bucketList.map((b, i) => dirDeltaTd(deltaArr[i], i === 0 ? dirGroupGap : periodBorder)).join('')
-        : '';
+      const deltasHtml = (mode === 'actual' || !deltaArr) ? '' : bucketList.map((b, i) => {
+        const bs = mode === 'delta' ? (i > 0 ? periodBorder : '') : (i === 0 ? dirGroupGap : periodBorder);
+        return dirDeltaTd(deltaArr[i], bs);
+      }).join('');
       return actualsHtml + deltasHtml;
     }
     // opts.catId: fila de categoría (tabla "por categoría"), toggle propio vía OPEN_DIR_CATS_KEY.
@@ -1218,51 +1224,95 @@
       const rowAttrs = isCat
         ? `class="dir-cat-row" data-catid="${PF.esc(opts.catId)}" role="button" tabindex="0"`
         : (isGrupo ? `class="cat-row" data-grupo="${PF.esc(opts.grupo)}" data-is-open="${isOpen}" role="button" tabindex="0"` : '');
+      const mode = opts.mode || 'both';
       return `<tr style="background:${rowBg}" ${rowAttrs}>
         <td class="proj-col" style="background:${rowBg}; font-weight:${opts.weight || 500}; color:${opts.labelColor || 'var(--pf-slate-700)'}">
           ${labelHtml}
         </td>
-        ${dirNumCells(actualArr, deltaArr, !!opts.isAcum, opts.buckets)}
-        <td class="trend-col">${PFCharts.sparkline(actualArr)}</td>
+        ${dirNumCells(actualArr, deltaArr, !!opts.isAcum, opts.buckets, mode)}
+        ${mode === 'delta' ? '' : `<td class="trend-col">${PFCharts.sparkline(actualArr)}</td>`}
       </tr>`;
     }
     // opts.projId: fila de proyecto dentro de un grupo de obra — arrastrable para reclasificar
     // (mismo comportamiento que tenía antes esa tabla). Sin projId: detalle dentro de una
-    // categoría (tabla "por categoría"), solo lectura.
+    // categoría (tabla "por categoría"), solo lectura. opts.mode: ver dirNumCells.
     function dirProjRowHtml(nombre, actualArr, deltaArr, bucketList, opts) {
       opts = opts || {};
+      const mode = opts.mode || 'both';
+      const trendTd = mode === 'delta' ? '' : `<td class="trend-col">${PFCharts.sparkline(actualArr)}</td>`;
       if (opts.projId) {
         return `<tr class="proj-row" ${isAdmin() ? 'draggable="true"' : ''} data-proj-id="${opts.projId}">
           <td class="proj-col"><span class="row-label" style="padding-left:14px; ${isAdmin() ? 'cursor:grab' : ''}"><i class="bi bi-dot"></i><span>${PF.esc(nombre)}</span></span></td>
-          ${dirNumCells(actualArr, deltaArr, false, bucketList)}
-          <td class="trend-col">${PFCharts.sparkline(actualArr)}</td>
+          ${dirNumCells(actualArr, deltaArr, false, bucketList, mode)}
+          ${trendTd}
         </tr>`;
       }
       return `<tr class="dir-proj-row">
         <td class="proj-col" style="padding-left:34px; font-weight:400; color:var(--pf-slate-500)">
           <span class="row-label"><i class="bi bi-dot"></i><span>${PF.esc(nombre)}</span></span>
         </td>
-        ${dirNumCells(actualArr, deltaArr, false, bucketList)}
-        <td class="trend-col">${PFCharts.sparkline(actualArr)}</td>
+        ${dirNumCells(actualArr, deltaArr, false, bucketList, mode)}
+        ${trendTd}
       </tr>`;
     }
-    function dirHeadRow(bucketList, labelCol) {
-      return `<tr><th class="proj-col">${labelCol}</th>${bucketList.map((b, i) => `<th class="num" style="min-width:${dirColW}; text-align:center; ${i > 0 ? periodBorder : ''}">${PF.esc(b.label)}</th>`).join('')}${bucketList.map((b, i) => `<th class="num small text-muted" style="text-align:center; ${i === 0 ? dirGroupGap : periodBorder}">Δ ${PF.esc(b.label)}</th>`).join('')}<th class="trend-col">Tendencia</th></tr>`;
+    // mode: 'both' (año + Δ juntas), 'actual' (solo columnas de año) o 'delta' (solo columnas Δ,
+    // sin el hueco extra que las separaba cuando iban en la misma tabla que los años).
+    function dirHeadRow(bucketList, labelCol, mode) {
+      mode = mode || 'both';
+      const yearsTh = mode === 'delta' ? '' : bucketList.map((b, i) => `<th class="num" style="min-width:${dirColW}; text-align:center; ${i > 0 ? periodBorder : ''}">${PF.esc(b.label)}</th>`).join('');
+      const deltaTh = mode === 'actual' ? '' : bucketList.map((b, i) => `<th class="num small text-muted" style="text-align:center; ${mode === 'delta' ? (i > 0 ? periodBorder : '') : (i === 0 ? dirGroupGap : periodBorder)}">Δ ${PF.esc(b.label)}</th>`).join('');
+      const trendTh = mode === 'delta' ? '' : '<th class="trend-col">Tendencia</th>';
+      return `<tr><th class="proj-col">${labelCol}</th>${yearsTh}${deltaTh}${trendTh}</tr>`;
+    }
+    // Arma el bloque de 2 tablas separadas — "Valores actuales" y "Variación (Δ)" — a pedido: el
+    // grupo/proyecto siempre a la izquierda, los años en su propia tabla y las variaciones en la
+    // suya, en vez de columnas Actual/Δ intercaladas en una sola tabla. Si no hay Δ que mostrar
+    // (sin presupuesto ni versión comparada), la segunda tabla ni se dibuja.
+    function dirTablePairHtml(opts) {
+      const wrapClass = `flujo-table-wrap table-sticky-col flujo-scroll${opts.wrapClass ? ' ' + opts.wrapClass : ''}`;
+      const actualTable = `<div class="${wrapClass}" style="margin-top:14px">
+        <table class="flujo-table">
+          <thead>${opts.headActual}</thead>
+          <tbody>${opts.bodyActual}</tbody>
+        </table>
+      </div>`;
+      if (!opts.showDelta) return actualTable;
+      const deltaTable = `<div class="dir-delta-block">
+        <div class="dir-delta-title"><i class="bi bi-arrow-left-right"></i> Variación (Δ)</div>
+        <div class="${wrapClass}">
+          <table class="flujo-table">
+            <thead>${opts.headDelta}</thead>
+            <tbody>${opts.bodyDelta}</tbody>
+          </table>
+        </div>
+      </div>`;
+      return actualTable + deltaTable;
     }
     const openDirCats = loadOpenMap(OPEN_DIR_CATS_KEY);
-    const dirRowsHtml = catFilas.map((f) => {
-      const catRow = dirRowHtml(f.nombre, 'bi-diagram-2', f.actual, catHasDelta ? catDeltaOf(f) : null, { catId: f.id });
-      const isOpen = Object.prototype.hasOwnProperty.call(openDirCats, f.id) ? openDirCats[f.id] : false;
-      const detalleHtml = isOpen
-        ? (catProyectosDetalle[f.id] || []).map((p) => dirProjRowHtml(p.nombre, p.actual, catHasDelta ? catDeltaOf(p) : null)).join('')
-        : '';
-      return catRow + detalleHtml;
-    }).join('');
-    const dirTotalRow = dirRowHtml('Flujo de caja del período', 'bi-arrow-left-right', catTotalActual, catHasDelta ? catDeltaOf({ actual: catTotalActual, ppto: catTotalPpto }) : null, { weight: 700, labelColor: 'var(--pf-slate-800)', rowBg: '#eff6ff' });
-    const dirAcumRow = dirRowHtml('Caja acumulada', 'bi-wallet2', catAcumActual, catHasDelta ? catDeltaOf({ actual: catAcumActual, ppto: catAcumPpto }) : null, { weight: 700, labelColor: 'var(--pf-slate-800)', isAcum: true });
-    const dirHeadHtml = catHasDelta
-      ? `<tr><th class="proj-col">Categoría</th>${buckets.map((b, i) => `<th class="num" style="min-width:${dirColW}; text-align:center; ${i > 0 ? periodBorder : ''}">${PF.esc(b.label)}</th>`).join('')}${buckets.map((b, i) => `<th class="num small text-muted" style="text-align:center; ${i === 0 ? dirGroupGap : periodBorder}">Δ ${PF.esc(b.label)}</th>`).join('')}<th class="trend-col">Tendencia</th></tr>`
-      : `<tr><th class="proj-col">Categoría</th>${buckets.map((b, i) => `<th class="num" style="min-width:${dirColW}; text-align:center; ${i > 0 ? periodBorder : ''}">${PF.esc(b.label)}</th>`).join('')}<th class="trend-col">Tendencia</th></tr>`;
+    // Genera las filas de la tabla "por categoría" en un modo dado ('actual' o 'delta') — 2
+    // tablas separadas en vez de 1 con ambos bloques, a pedido: valores a la izquierda del todo
+    // (grupo/proyecto), años en su propia tabla, variaciones en la suya.
+    function buildDirCatRows(mode) {
+      return catFilas.map((f) => {
+        const catRow = dirRowHtml(f.nombre, 'bi-diagram-2', f.actual, catHasDelta ? catDeltaOf(f) : null, { catId: f.id, mode });
+        const isOpen = Object.prototype.hasOwnProperty.call(openDirCats, f.id) ? openDirCats[f.id] : false;
+        const detalleHtml = isOpen
+          ? (catProyectosDetalle[f.id] || []).map((p) => dirProjRowHtml(p.nombre, p.actual, catHasDelta ? catDeltaOf(p) : null, buckets, { mode })).join('')
+          : '';
+        return catRow + detalleHtml;
+      }).join('');
+    }
+    function dirTotalAcumRows(mode) {
+      const totalRow = dirRowHtml('Flujo de caja del período', 'bi-arrow-left-right', catTotalActual, catHasDelta ? catDeltaOf({ actual: catTotalActual, ppto: catTotalPpto }) : null, { weight: 700, labelColor: 'var(--pf-slate-800)', rowBg: '#eff6ff', mode });
+      const acumRow = dirRowHtml('Caja acumulada', 'bi-wallet2', catAcumActual, catHasDelta ? catDeltaOf({ actual: catAcumActual, ppto: catAcumPpto }) : null, { weight: 700, labelColor: 'var(--pf-slate-800)', isAcum: true, mode });
+      return totalRow + acumRow;
+    }
+    const dirRowsHtml = buildDirCatRows('actual');
+    const dirTotalAcumHtml = dirTotalAcumRows('actual');
+    const dirHeadHtml = dirHeadRow(buckets, 'Categoría', 'actual');
+    const dirDeltaRowsHtml = buildDirCatRows('delta');
+    const dirDeltaTotalAcumHtml = dirTotalAcumRows('delta');
+    const dirDeltaHeadHtml = dirHeadRow(buckets, 'Categoría', 'delta');
     const GRAN_OPTS = [['trimestral', 'Trimestral'], ['semestral', 'Semestral'], ['anual', 'Anual']];
     const dirTabsHtml = `<div class="dir-tabs" role="tablist">${GRAN_OPTS.map(([g, label]) =>
       `<button type="button" class="dir-tab ${g === resumenGranularidad ? 'active' : ''}" role="tab" aria-selected="${g === resumenGranularidad}" tabindex="${g === resumenGranularidad ? 0 : -1}" data-gran="${g}">${label}</button>`).join('')}</div>`;
@@ -1354,28 +1404,44 @@
     const tablaObraAcumPpto = []; let accTP = cajaInicialCfg; tablaObraTotalPpto.forEach((v) => { accTP += v; tablaObraAcumPpto.push(accTP); });
 
     const obraDeltaOf = (actualArr, pptoArr) => actualArr.map((a, i) => a - pptoArr[i]);
-    const lineasTablaObraHtml = lineasTablaObra.map((l) =>
-      dirRowHtml(l.nombre, 'bi-diagram-2', l.actual, obraDeltaOf(l.actual, l.ppto), { buckets: obraAnualBuckets })).join('');
-    const tablaObraTotalRow = dirRowHtml('Flujo de caja', 'bi-arrow-left-right', tablaObraTotalActual, obraDeltaOf(tablaObraTotalActual, tablaObraTotalPpto),
-      { buckets: obraAnualBuckets, weight: 700, labelColor: 'var(--pf-slate-800)', rowBg: '#eff6ff' });
-    const tablaObraAcumRow = dirRowHtml('Flujo de caja acumulado', 'bi-wallet2', tablaObraAcumActual, obraDeltaOf(tablaObraAcumActual, tablaObraAcumPpto),
-      { buckets: obraAnualBuckets, weight: 700, labelColor: 'var(--pf-slate-800)', isAcum: true });
-    const tablaObraHead = dirHeadRow(obraAnualBuckets, 'Concepto');
 
-    let obraIdx = 0;
-    const obraRowsHtml = filasObra.map((f) => {
-      const isOpen = Object.prototype.hasOwnProperty.call(openGrupos, f.grupo) ? openGrupos[f.grupo] : obraIdx === 0;
-      obraIdx++;
-      const grupoRow = dirRowHtml(f.grupo, 'bi-diagram-2', f.actual, obraDeltaOf(f.actual, f.ppto), { grupo: f.grupo, grupoOpen: isOpen });
-      const proyRows = isOpen ? f.proys.map((p) => {
-        const pActual = buckets.map((b) => sumField([p], b.months, 'proyeccion'));
-        const pPpto = buckets.map((b) => sumField([p], b.months, 'presupuesto'));
-        return dirProjRowHtml(p.nombre, pActual, obraDeltaOf(pActual, pPpto), buckets, { projId: p.id });
-      }).join('') : '';
-      return grupoRow + proyRows;
-    }).join('');
-    const obraTotalRow = dirRowHtml('Flujo de caja (obra)', 'bi-arrow-left-right', totalActualObra, obraDeltaOf(totalActualObra, totalPptoObra), { weight: 700, labelColor: 'var(--pf-slate-800)', rowBg: '#eff6ff' });
-    const obraAcumRow = dirRowHtml('Flujo acumulado (obra)', 'bi-wallet2', acumActualObra, obraDeltaOf(acumActualObra, acumPptoObra), { weight: 700, labelColor: 'var(--pf-slate-800)', isAcum: true });
+    function buildTablaObraRows(mode) {
+      const lineas = lineasTablaObra.map((l) =>
+        dirRowHtml(l.nombre, 'bi-diagram-2', l.actual, obraDeltaOf(l.actual, l.ppto), { buckets: obraAnualBuckets, mode })).join('');
+      const total = dirRowHtml('Flujo de caja', 'bi-arrow-left-right', tablaObraTotalActual, obraDeltaOf(tablaObraTotalActual, tablaObraTotalPpto),
+        { buckets: obraAnualBuckets, weight: 700, labelColor: 'var(--pf-slate-800)', rowBg: '#eff6ff', mode });
+      const acum = dirRowHtml('Flujo de caja acumulado', 'bi-wallet2', tablaObraAcumActual, obraDeltaOf(tablaObraAcumActual, tablaObraAcumPpto),
+        { buckets: obraAnualBuckets, weight: 700, labelColor: 'var(--pf-slate-800)', isAcum: true, mode });
+      return lineas + total + acum;
+    }
+    const tablaObraBodyActual = buildTablaObraRows('actual');
+    const tablaObraHeadActual = dirHeadRow(obraAnualBuckets, 'Concepto', 'actual');
+    const tablaObraBodyDelta = buildTablaObraRows('delta');
+    const tablaObraHeadDelta = dirHeadRow(obraAnualBuckets, 'Concepto', 'delta');
+
+    function buildObraRows(mode) {
+      let idx = 0;
+      return filasObra.map((f) => {
+        const isOpen = Object.prototype.hasOwnProperty.call(openGrupos, f.grupo) ? openGrupos[f.grupo] : idx === 0;
+        idx++;
+        const grupoRow = dirRowHtml(f.grupo, 'bi-diagram-2', f.actual, obraDeltaOf(f.actual, f.ppto), { grupo: f.grupo, grupoOpen: isOpen, mode });
+        const proyRows = isOpen ? f.proys.map((p) => {
+          const pActual = buckets.map((b) => sumField([p], b.months, 'proyeccion'));
+          const pPpto = buckets.map((b) => sumField([p], b.months, 'presupuesto'));
+          return dirProjRowHtml(p.nombre, pActual, obraDeltaOf(pActual, pPpto), buckets, { projId: p.id, mode });
+        }).join('') : '';
+        return grupoRow + proyRows;
+      }).join('');
+    }
+    function buildObraTotalAcum(mode) {
+      const total = dirRowHtml('Flujo de caja (obra)', 'bi-arrow-left-right', totalActualObra, obraDeltaOf(totalActualObra, totalPptoObra), { weight: 700, labelColor: 'var(--pf-slate-800)', rowBg: '#eff6ff', mode });
+      const acum = dirRowHtml('Flujo acumulado (obra)', 'bi-wallet2', acumActualObra, obraDeltaOf(acumActualObra, acumPptoObra), { weight: 700, labelColor: 'var(--pf-slate-800)', isAcum: true, mode });
+      return total + acum;
+    }
+    const obraRowsHtml = buildObraRows('actual') + buildObraTotalAcum('actual');
+    const obraHeadActual = dirHeadRow(buckets, 'Grupo / Proyecto', 'actual');
+    const obraRowsDeltaHtml = buildObraRows('delta') + buildObraTotalAcum('delta');
+    const obraHeadDelta = dirHeadRow(buckets, 'Grupo / Proyecto', 'delta');
 
     el.innerHTML = `
       ${verdictHtml}
@@ -1405,13 +1471,11 @@
           </div>
         </div>
         ${dirCompareBannerHtml}
-        ${!buckets.length ? '<div class="text-muted">No hay meses con datos.</div>' : `
-        <div class="flujo-table-wrap table-sticky-col flujo-scroll" style="margin-top:14px">
-          <table class="flujo-table">
-            <thead>${dirHeadHtml}</thead>
-            <tbody>${dirRowsHtml}${dirTotalRow}${dirAcumRow}</tbody>
-          </table>
-        </div>`}
+        ${!buckets.length ? '<div class="text-muted">No hay meses con datos.</div>' : dirTablePairHtml({
+          headActual: dirHeadHtml, bodyActual: dirRowsHtml + dirTotalAcumHtml,
+          headDelta: dirDeltaHeadHtml, bodyDelta: dirDeltaRowsHtml + dirDeltaTotalAcumHtml,
+          showDelta: catHasDelta,
+        })}
         <div class="dir-footer-note">
           <i class="bi bi-info-circle"></i>
           <span>Las columnas de <b>presupuesto y desviación</b> aparecen cuando se importa el PPTO por categoría.</span>
@@ -1422,13 +1486,11 @@
         <h6>Flujo de Obras por año de inicio</h6>
         <p class="panel-hint">Todo excepto "${PF.esc(CAT_FINANCIAMIENTO)}". Valores en UF. El año se infiere del primer aporte
           relevante de cada proyecto — arrastra una fila a otro grupo si hace falta corregirlo.</p>
-        ${!buckets.length ? '<div class="text-muted">No hay meses con datos.</div>' : `
-        <div class="flujo-table-wrap table-sticky-col flujo-scroll obra-table">
-          <table class="flujo-table">
-            <thead>${dirHeadRow(buckets, 'Grupo / Proyecto')}</thead>
-            <tbody>${obraRowsHtml}${obraTotalRow}${obraAcumRow}</tbody>
-          </table>
-        </div>`}
+        ${!buckets.length ? '<div class="text-muted">No hay meses con datos.</div>' : dirTablePairHtml({
+          headActual: obraHeadActual, bodyActual: obraRowsHtml,
+          headDelta: obraHeadDelta, bodyDelta: obraRowsDeltaHtml,
+          showDelta: true, wrapClass: 'obra-table',
+        })}
       </div>
       <div class="row g-3">
         <div class="col-lg-6"><div class="panel mb-0">
@@ -1466,13 +1528,11 @@
           </div>
           <button class="flujo-btn" id="resumen-obra-excel"><i class="bi bi-file-earmark-excel" style="color:#15803d"></i> Exportar Excel</button>
         </div>
-        ${obraAnualLabels.length ? `
-        <div class="flujo-table-wrap table-sticky-col flujo-scroll">
-          <table class="flujo-table">
-            <thead>${tablaObraHead}</thead>
-            <tbody>${lineasTablaObraHtml}${tablaObraTotalRow}${tablaObraAcumRow}</tbody>
-          </table>
-        </div>` : '<div class="text-muted">No hay períodos en ese rango de años.</div>'}
+        ${obraAnualLabels.length ? dirTablePairHtml({
+          headActual: tablaObraHeadActual, bodyActual: tablaObraBodyActual,
+          headDelta: tablaObraHeadDelta, bodyDelta: tablaObraBodyDelta,
+          showDelta: true,
+        }) : '<div class="text-muted">No hay períodos en ese rango de años.</div>'}
       </div>`;
 
     if (buckets.length) {
@@ -1647,15 +1707,18 @@
   const OPEN_PROJ_GRUPOS_KEY = 'pf.proyectos.openGrupos';
   const OPEN_PROJ_CATS_KEY = 'pf.proyectos.openCats';
   let proyectosBuscar = '';
+  let proyectosEstadoFiltro = ''; // '' = todos; si no, uno de ESTADOS_PROYECTO[].id o 'sin' (sin definir)
   const ESTADOS_PROYECTO = [
     { id: 'evaluacion', nombre: 'En evaluación', color: 'var(--pf-warning-700)', bg: 'var(--pf-warning-100)' },
     { id: 'ejecucion', nombre: 'En ejecución', color: 'var(--pf-primary-700)', bg: 'var(--pf-primary-100)' },
     { id: 'terminado', nombre: 'Terminado', color: 'var(--pf-success-700)', bg: 'var(--pf-success-100)' },
   ];
   function estadoInfo(id) { return ESTADOS_PROYECTO.find((e) => e.id === id) || null; }
+  // Siempre muestra algo (también "Sin estado" en gris) — antes, sin estado definido no se veía
+  // ningún badge y el campo pasaba desapercibido.
   function estadoBadgeHtml(id) {
     const e = estadoInfo(id);
-    if (!e) return '';
+    if (!e) return `<span class="estado-badge" style="color:var(--pf-slate-500); background:var(--pf-slate-100)">Sin estado</span>`;
     return `<span class="estado-badge" style="color:${e.color}; background:${e.bg}">${PF.esc(e.nombre)}</span>`;
   }
 
@@ -1744,46 +1807,58 @@
     const norm = (s) => (s || '').toString().normalize('NFD').replace(DIACRITICS_RE, '').toLowerCase().trim();
     const q = norm(proyectosBuscar);
     const matches = (p) => {
-      if (!q) return true;
-      return norm(`${p.nombre} ${p.tipo || ''} ${p.grupoPadre || ''}`).includes(q);
+      if (q && !norm(`${p.nombre} ${p.tipo || ''} ${p.grupoPadre || ''}`).includes(q)) return false;
+      if (proyectosEstadoFiltro === 'sin') return !p.estado;
+      if (proyectosEstadoFiltro) return p.estado === proyectosEstadoFiltro;
+      return true;
     };
+    const filtroActivo = !!(q || proyectosEstadoFiltro);
     let catIdx = 0;
     const porCat = state.categorias.map((cat) => {
       const proysCat = state.proyectos.filter((p) => p.categoriaId === cat.id);
       const proys = proysCat.filter(matches);
       if (!proysCat.length) return '';
-      if (q && !proys.length) return '';
-      // Con búsqueda activa, la categoría con resultados se muestra siempre abierta.
-      const isOpen = q ? true : (Object.prototype.hasOwnProperty.call(openCats, cat.id) ? openCats[cat.id] : catIdx === 0);
+      if (filtroActivo && !proys.length) return '';
+      // Con un filtro activo (búsqueda o estado), la categoría con resultados se muestra siempre abierta.
+      const isOpen = filtroActivo ? true : (Object.prototype.hasOwnProperty.call(openCats, cat.id) ? openCats[cat.id] : catIdx === 0);
       catIdx++;
       const items = proyectosGridHtml(proys) || '<div class="text-muted small px-2">Sin proyectos</div>';
       return `<div class="mb-3 proj-cat-group">
         <div class="proj-cat-header" data-cat-toggle="${cat.id}" role="button" tabindex="0">
           <i class="bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'}"></i>
           <span class="fw-semibold">${PF.esc(cat.nombre)}</span>
-          <span class="text-muted small">(${proys.length}${q ? ' de ' + proysCat.length : ''})</span>
+          <span class="text-muted small">(${proys.length}${filtroActivo ? ' de ' + proysCat.length : ''})</span>
         </div>
         ${isOpen ? `<div class="row g-2 mt-1">${items}</div>` : ''}
       </div>`;
     }).join('');
     const sinCat = state.proyectos.filter((p) => !state.categorias.some((c) => c.id === p.categoriaId)).filter(matches);
+    const estadoChips = [{ id: '', nombre: 'Todos' }, ...ESTADOS_PROYECTO, { id: 'sin', nombre: 'Sin estado' }]
+      .map((e) => `<button type="button" class="dash-year-chip ${proyectosEstadoFiltro === e.id ? 'active' : ''}" data-estado-filtro="${e.id}">${PF.esc(e.nombre)}</button>`).join('');
     el.innerHTML = `
-      <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-        <div class="d-flex align-items-center gap-2">
-          <div class="input-group input-group-sm" style="width:260px">
-            <span class="input-group-text"><i class="bi bi-search"></i></span>
-            <input type="text" class="form-control" id="proj-search" placeholder="Buscar proyecto..." value="${PF.esc(proyectosBuscar)}">
+      <div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
+        <div class="d-flex flex-column gap-2">
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <div class="input-group input-group-sm" style="width:260px">
+              <span class="input-group-text"><i class="bi bi-search"></i></span>
+              <input type="text" class="form-control" id="proj-search" placeholder="Buscar proyecto..." value="${PF.esc(proyectosBuscar)}">
+            </div>
+            <span class="text-muted small">${state.proyectos.length} proyecto(s)</span>
           </div>
-          <span class="text-muted small">${state.proyectos.length} proyecto(s)</span>
+          <div class="dash-year-chips" style="margin-bottom:0"><span class="text-muted small me-1">Estado:</span>${estadoChips}</div>
         </div>
         ${isAdmin() ? '<button class="btn btn-sm btn-primary" id="btn-nuevo-proj"><i class="bi bi-plus-lg"></i> Nuevo proyecto</button>' : ''}
       </div>
-      ${porCat || '<div class="text-muted small">Ningún proyecto coincide con la búsqueda.</div>'}
+      ${porCat || '<div class="text-muted small">Ningún proyecto coincide con el filtro.</div>'}
       ${sinCat.length ? `<div class="mb-3"><div class="fw-semibold mb-2 text-muted">Sin categoría</div>
         <div class="row g-2">${proyectosGridHtml(sinCat)}</div></div>` : ''}
       <div id="proj-detail"></div>`;
 
     if (isAdmin()) document.getElementById('btn-nuevo-proj').addEventListener('click', () => nuevoProyectoDialog());
+    el.querySelectorAll('[data-estado-filtro]').forEach((btn) => btn.addEventListener('click', () => {
+      proyectosEstadoFiltro = btn.dataset.estadoFiltro;
+      renderProyectos();
+    }));
     el.querySelectorAll('[data-proj]').forEach((c) => c.addEventListener('click', () => renderProyectoDetail(c.dataset.proj)));
     el.querySelectorAll('[data-grupo-toggle]').forEach((c) => c.addEventListener('click', () => {
       const nombre = c.dataset.grupoToggle;
@@ -2616,17 +2691,27 @@
       </div>`;
 
     el.querySelector('#rep-pdf-directorio').addEventListener('click', () => {
-      const t = buildTimeline();
-      const months = t.months;
+      const months = allMonths();
       if (!months.length) { toast('No hay datos para generar el resumen', 'warning'); return; }
+      const t = buildTimeline();
 
-      // ---- Flujo por año: neto del año y caja acumulada al cierre de cada año.
+      // ---- Mismos números que Resumen Directorio: flujo por categoría, agregado anual, y el
+      // acumulado del rango visible (sin cajaInicial) — para que este PDF calce con lo que se ve
+      // en pantalla en esa vista, no con otra fuente de verdad.
       const buckets = periodBuckets(months, 'anual');
-      const flujoBody = buckets.map((b) => {
-        const net = b.months.reduce((a, m) => a + (t.net[m] || 0), 0);
-        const cierre = t.proj[b.months[b.months.length - 1]] || 0;
-        return [b.label, PF.fmtNum(net), PF.fmtNum(cierre)];
+      const catsConProyectos = state.categorias.filter((cat) => state.proyectos.some((p) => p.categoriaId === cat.id));
+      const filasCat = catsConProyectos.map((cat) => {
+        const proys = state.proyectos.filter((p) => p.categoriaId === cat.id);
+        return { nombre: cat.nombre, actual: buckets.map((b) => sumField(proys, b.months, 'proyeccion')) };
       });
+      const totalActualAnual = buckets.map((_, i) => filasCat.reduce((a, f) => a + f.actual[i], 0));
+      const acumActualAnual = []; let accPdf = 0; totalActualAnual.forEach((v) => { accPdf += v; acumActualAnual.push(accPdf); });
+      const veredicto = resumenVeredicto(buckets, acumActualAnual);
+      const toneByTipo = { ok: 'ok', warning: 'warning', danger: 'danger' };
+
+      const flujoCatBody = filasCat.map((f) => [f.nombre, ...f.actual.map((v) => (v === 0 ? '—' : PF.fmtNum(v)))]);
+      flujoCatBody.push(['Flujo de caja del período', ...totalActualAnual.map((v) => (v === 0 ? '—' : PF.fmtNum(v)))]);
+      flujoCatBody.push(['Caja acumulada', ...acumActualAnual.map((v) => (v === 0 ? '—' : PF.fmtNum(v)))]);
 
       // ---- Próximos aportes y devoluciones: movimientos desde el mes actual, los más grandes primero.
       const cur = PF.currentMonth();
@@ -2635,33 +2720,51 @@
       futMonths.forEach((m) => {
         state.proyectos.forEach((p) => {
           const v = (p.proyeccion || {})[m] || 0;
-          if (v !== 0) movimientos.push({ mes: m, nombre: p.nombre, v });
+          if (v !== 0) movimientos.push({ mes: m, nombre: p.nombre, cat: categoriaNombre(p.categoriaId), v });
         });
       });
       const proximosBody = movimientos
         .sort((a, b) => Math.abs(b.v) - Math.abs(a.v))
-        .slice(0, 14)
-        .map((x) => [PF.monthLabel(x.mes), x.nombre, x.v > 0 ? 'Devolución' : 'Aporte', PF.fmtNum(Math.abs(x.v))]);
+        .slice(0, 16)
+        .map((x) => [PF.monthLabel(x.mes), x.nombre, x.cat, x.v > 0 ? 'Devolución' : 'Aporte', PF.fmtNum(Math.abs(x.v))]);
 
       // ---- Cantidad de proyectos por estado (columna "Estado" en Por proyecto).
       const countEstado = (id) => state.proyectos.filter((p) => p.estado === id).length;
       const sinEstado = state.proyectos.filter((p) => !p.estado).length;
-      const estadoBody = ESTADOS_PROYECTO.map((e) => [e.nombre, countEstado(e.id)])
-        .concat(sinEstado ? [['Sin definir', sinEstado]] : []);
+      const estadoBody = ESTADOS_PROYECTO.map((e) => [e.nombre, String(countEstado(e.id))])
+        .concat(sinEstado ? [['Sin definir', String(sinEstado)]] : []);
 
+      const cierreVal = acumActualAnual[acumActualAnual.length - 1] || 0;
       PFReports.exportPDF({
         title: 'Resumen Directorio',
-        subtitle: `Generado el ${new Date().toLocaleDateString('es-CL', { day: '2-digit', month: 'long', year: 'numeric' })} · Caja inicial ${PF.fmtMoney(state.config.cajaInicial)}`,
+        subtitle: `${buckets[0].label} – ${buckets[buckets.length - 1].label} · Caja inicial ${PF.fmtMoney(state.config.cajaInicial)} · Moneda ${state.config.moneda || 'UF'}`,
+        verdict: { text: veredicto.texto.replace(/<[^>]+>/g, ''), tone: toneByTipo[veredicto.tipo] },
         kpis: [
-          { label: 'Caja proyectada al cierre', value: PF.fmtNum(t.proj[months[months.length - 1]] || 0) + ' UF', accent: '#2563eb' },
+          { label: 'Caja acumulada al cierre', value: PF.fmtNum(cierreVal) + ' UF', accent: cierreVal < 0 ? '#dc2626' : '#16a34a' },
           { label: 'Mínimo de caja proyectado', value: PF.fmtNum(t.minAcc) + ' UF', accent: '#dc2626' },
           { label: 'Proyectos en ejecución', value: String(countEstado('ejecucion')), accent: '#2563eb' },
           { label: 'Proyectos en evaluación', value: String(countEstado('evaluacion')), accent: '#b45309' },
+          { label: 'Proyectos terminados', value: String(countEstado('terminado')), accent: '#16a34a' },
         ],
         sections: [
-          { heading: 'Flujo proyectado por año', head: ['Año', 'Flujo neto (UF)', 'Caja acumulada al cierre (UF)'], body: flujoBody },
-          { heading: 'Próximos aportes y devoluciones (mayores montos)', head: ['Mes', 'Proyecto', 'Tipo', 'Monto (UF)'], body: proximosBody.length ? proximosBody : [['—', 'Sin movimientos futuros', '', '']] },
-          { heading: 'Proyectos por estado', head: ['Estado', 'Cantidad'], body: estadoBody },
+          {
+            heading: 'Flujo de caja por categoría y año',
+            note: 'Valores en UF — mismos datos que la tabla "Flujo de caja por categoría" de Resumen Directorio.',
+            head: ['Categoría', ...buckets.map((b) => b.label)],
+            body: flujoCatBody,
+            columnStyles: { 0: { fontStyle: 'bold', cellWidth: 160 } },
+          },
+          {
+            heading: 'Próximos aportes y devoluciones',
+            note: 'Movimientos futuros de mayor monto, todos los proyectos.',
+            head: ['Mes', 'Proyecto', 'Categoría', 'Tipo', 'Monto (UF)'],
+            body: proximosBody.length ? proximosBody : [['—', 'Sin movimientos futuros', '', '', '']],
+          },
+          {
+            heading: 'Proyectos por estado',
+            head: ['Estado', 'Cantidad'],
+            body: estadoBody,
+          },
         ],
       });
     });
