@@ -569,6 +569,13 @@
 
   // ------------------------------------------------------- Vista: Flujo de Caja (mensual)
   const OPEN_CATS_KEY = 'pf.flujo.openCats';
+  const OPEN_CATS_ESTADO_KEY = 'pf.flujo.openCatsEstado';
+  const FLUJO_AGRUPACION_KEY = 'pf.flujo.agrupacion';
+  // 'categoria' (las 5 categorías de siempre) o 'estado' (En evaluación / En ejecución /
+  // Terminado / Sin estado) — mismo grid, misma edición, solo cambia el criterio de agrupación.
+  let flujoAgrupacion = (function () {
+    try { return localStorage.getItem(FLUJO_AGRUPACION_KEY) || 'categoria'; } catch (e) { return 'categoria'; }
+  })();
   // Persiste qué filas de grupo quedan expandidas en una tabla colapsable (Flujo de Caja mensual,
   // Flujo de Obras en Resumen Directorio), cada una con su propia key de localStorage.
   function loadOpenMap(key) {
@@ -698,13 +705,24 @@
     const labels = months.map(PF.monthLabel);
     const umbral = Number(state.config.umbralAlerta) || 0;
     const mesesBajoUmbral = months.filter((m) => t.proj[m] < umbral).length;
-    const openCats = loadOpenMap(OPEN_CATS_KEY);
+    const groupByEstado = flujoAgrupacion === 'estado';
+    const openCatsKey = groupByEstado ? OPEN_CATS_ESTADO_KEY : OPEN_CATS_KEY;
+    const openCats = loadOpenMap(openCatsKey);
+    // Grupos a recorrer: las 5 categorías de siempre, o Evaluación/Ejecución/Terminado/Sin
+    // estado — mismo id que usa el badge de "Por proyecto" (ver ESTADOS_PROYECTO), más 'sin'
+    // para los que no tienen estado definido.
+    const grupos = groupByEstado
+      ? [...ESTADOS_PROYECTO, { id: 'sin', nombre: 'Sin estado' }]
+      : state.categorias;
+    const proysDeGrupo = (g) => groupByEstado
+      ? state.proyectos.filter((p) => (p.estado || 'sin') === g.id)
+      : state.proyectos.filter((p) => p.categoriaId === g.id);
 
     // ---- Filas de la tabla.
     let rows = '';
     let catIdx = 0;
-    state.categorias.forEach((cat) => {
-      const proys = state.proyectos.filter((p) => p.categoriaId === cat.id);
+    grupos.forEach((cat) => {
+      const proys = proysDeGrupo(cat);
       if (!proys.length) return;
       const isOpen = Object.prototype.hasOwnProperty.call(openCats, cat.id) ? openCats[cat.id] : catIdx === 0;
       catIdx++;
@@ -768,8 +786,16 @@
       </div>
       ${flujoEditMode ? '<div class="alert alert-primary py-2 px-3 mb-3 small"><i class="bi bi-info-circle me-1"></i>Modo edición: escribe un valor y usa las flechas o Enter para moverte, como en Excel. Los cambios quedan pendientes hasta que presiones "Guardar cambios".</div>' : ''}
       <div class="panel mb-0">
-        <h3>Flujo de caja mensual por proyecto</h3>
-        <p class="panel-hint">Haz clic en una categoría para expandir sus proyectos. Rojo = aporte, verde = devolución.</p>
+        <div class="panel-header-row" style="flex-wrap:wrap; gap:12px">
+          <div>
+            <h3>Flujo de caja mensual por proyecto</h3>
+            <p class="panel-hint">Haz clic en un grupo para expandir sus proyectos. Rojo = aporte, verde = devolución.</p>
+          </div>
+          <div class="dir-tabs" role="tablist" style="margin-left:auto">
+            <button type="button" class="dir-tab ${!groupByEstado ? 'active' : ''}" role="tab" aria-selected="${!groupByEstado}" data-flujo-agrup="categoria">Categoría</button>
+            <button type="button" class="dir-tab ${groupByEstado ? 'active' : ''}" role="tab" aria-selected="${groupByEstado}" data-flujo-agrup="estado">Estado</button>
+          </div>
+        </div>
         <div class="flujo-table-wrap flujo-scroll">
           <table class="flujo-table">
             <thead><tr><th class="proj-col">Proyecto</th><th class="anio-col">Año constr.</th>${headCols}<th class="trend-col">Tendencia</th></tr></thead>
@@ -790,13 +816,19 @@
       if (inp) { inp.focus(); inp.select(); }
     }
 
+    el.querySelectorAll('[data-flujo-agrup]').forEach((btn) => btn.addEventListener('click', () => {
+      flujoAgrupacion = btn.dataset.flujoAgrup;
+      try { localStorage.setItem(FLUJO_AGRUPACION_KEY, flujoAgrupacion); } catch (e2) { /* localStorage puede no estar disponible */ }
+      renderFlujoMensual();
+    }));
+
     el.querySelectorAll('.cat-row').forEach((row) => {
       const toggle = () => {
         const id = row.dataset.catId;
         const wasOpen = row.dataset.isOpen === 'true';
-        const cur = loadOpenMap(OPEN_CATS_KEY);
+        const cur = loadOpenMap(openCatsKey);
         cur[id] = !wasOpen;
-        saveOpenMap(OPEN_CATS_KEY, cur);
+        saveOpenMap(openCatsKey, cur);
         renderFlujoMensual();
       };
       row.addEventListener('click', toggle);
