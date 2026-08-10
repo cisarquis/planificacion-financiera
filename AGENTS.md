@@ -102,13 +102,16 @@ Firestore, solo mueve el valor en memoria. Las celdas con un cambio sin guardar 
 misma estructura en vivo, cualquier edición manual —guardada o todavía pendiente— ya queda reflejada
 al exportar sin lógica extra de reconciliación.
 
-**Columna "Año constr."**: entre "Proyecto" y los meses, cada fila de proyecto tiene un input de año
-(`anio-input`, `app.js`) que **siempre es editable** (no depende de "Editar flujo" — es un solo campo
-por proyecto, no una grilla, así que se guarda al vuelo con `DB.updateProyecto` como el resto de
-ediciones de un solo campo). Muestra `proyecto.anioConstruccion` si ya se definió, o si no un valor
-por defecto calculado en el momento (`anioConstruccionEfectivo`, no se persiste hasta que el usuario
-lo edite). Este campo es la entrada manual para el agrupamiento de "Flujo de Obras por año de inicio"
-en Resumen Directorio — ver esa sección para el detalle de `grupoObraDe`.
+**Año de construcción**: se edita en "Por proyecto" (diálogo de "Nuevo/Editar proyecto", junto a
+Estado), **no en Flujo de Caja mensual** (se sacó de ahí — vivía como una columna "Año constr." por
+fila de proyecto, pero se movió porque es metadata del proyecto, no un dato del flujo, y el resto de
+esa metadata — Estado, Grupo, Tipo — ya se edita en "Por proyecto"). El campo `proyecto.anioConstruccion`
+se guarda con `DB.updateProyecto` como cualquier otro campo del diálogo. El input se precarga con
+`anioConstruccionEfectivo(p)`: el valor ya definido si existe, o si no un valor por defecto inferido
+en el momento (no se persiste hasta guardar el diálogo). Este campo es la entrada manual para el
+agrupamiento de "Flujo de Obras por año de inicio" en Resumen Directorio — ver esa sección para el
+detalle de `grupoObraDe`. También se muestra (solo lectura) en la tarjeta y en el detalle de "Por
+proyecto" cuando está definido.
 
 **Por qué comparte proyecto de Firebase con Mira pero no la base de datos**: se evaluó un proyecto
 Firebase 100% aparte, pero la cuenta de Google del usuario (`csarquis@ingevec.cl`) pertenece a la

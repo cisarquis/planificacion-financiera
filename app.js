@@ -641,15 +641,6 @@
     const dirty = orig !== v;
     return `<td class="num p-1"><input type="number" step="any" class="form-control form-control-sm num flujo-edit-input${dirty ? ' dirty' : ''}" data-proj-id="${projId}" data-mes="${mes}" value="${v}"></td>`;
   }
-  // Año de construcción por proyecto, editable siempre (no depende de "Editar flujo") porque es un
-  // solo valor por proyecto, no una grilla — se guarda al vuelo como el resto de ediciones de un
-  // solo campo (renombrar categoría, etc.). Influye en el agrupamiento de "Flujo de Obras por año
-  // de inicio" en Resumen Directorio (ver grupoObraDe).
-  function anioCell(p) {
-    const anio = anioConstruccionEfectivo(p);
-    if (!isAdmin()) return `<td class="anio-col"><span class="anio-badge">${anio}</span></td>`;
-    return `<td class="anio-col"><input type="number" class="form-control form-control-sm anio-input" data-proj-id="${p.id}" value="${anio}" min="2000" max="2100"></td>`;
-  }
   // Fila de un proyecto normal dentro de Flujo de Caja mensual — indent mayor (28px) cuando está
   // anidado bajo la fila de un grupo (ver flujoGrupoRow), para que se note visualmente que es un
   // sub-proyecto de ese grupo y no otro proyecto suelto de la categoría.
@@ -657,7 +648,6 @@
     const projArr = months.map((m) => (p.proyeccion || {})[m] || 0);
     return `<tr class="proj-row">
       <td class="proj-col"><span class="row-label" style="padding-left:${indent || 14}px"><i class="bi bi-dot"></i><span>${PF.esc(p.nombre)}</span></span></td>
-      ${anioCell(p)}
       ${months.map((m, i) => flujoProjCell(projArr[i], p.id, m)).join('')}
       <td class="trend-col">${PFCharts.sparkline(projArr)}</td>
     </tr>`;
@@ -672,7 +662,6 @@
     const arr = months.map((m) => merged[m] || 0);
     return `<tr class="proj-row" data-grupo-flujo="${PF.esc(nombre)}" role="button" tabindex="0" style="cursor:pointer">
       <td class="proj-col"><span class="row-label" style="padding-left:14px"><i class="bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'}"></i><span>${PF.esc(nombre)}</span></span></td>
-      <td class="anio-col"></td>
       ${months.map((m, i) => flujoCell(arr[i])).join('')}
       <td class="trend-col">${PFCharts.sparkline(arr)}</td>
     </tr>`;
@@ -730,7 +719,6 @@
       const netArr = months.map((m) => net[m]);
       rows += `<tr class="cat-row" data-cat-id="${cat.id}" data-is-open="${isOpen}" role="button" tabindex="0">
         <td class="proj-col"><span class="row-label"><i class="bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'}"></i><span>${PF.esc(cat.nombre)}</span></span></td>
-        <td class="anio-col"></td>
         ${months.map((m) => flujoCell(net[m])).join('')}
         <td class="trend-col">${PFCharts.sparkline(netArr)}</td>
       </tr>`;
@@ -743,21 +731,18 @@
 
     const totalRow = `<tr class="total-row">
       <td class="proj-col"><span class="row-label"><i class="bi bi-arrow-left-right"></i><span>Flujo de caja del mes</span></span></td>
-      <td class="anio-col"></td>
       ${netArr.map(flujoCell).join('')}
       <td class="trend-col">${PFCharts.sparkline(netArr)}</td>
     </tr>`;
 
     const acumRow = `<tr class="acum-row">
       <td class="proj-col"><span class="row-label"><i class="bi bi-wallet2"></i><span>Caja proyectada acumulada</span></span></td>
-      <td class="anio-col"></td>
       ${accArr.map((v) => `<td class="num ${v < umbral ? 'sem-bajo' : (v < umbral * 1.5 ? 'sem-riesgo' : 'sem-ok')}">${PF.fmtNum(v)}</td>`).join('')}
       <td class="trend-col">${PFCharts.sparkline(accArr)}</td>
     </tr>`;
 
     const realRow = `<tr class="real-row">
       <td class="proj-col"><span class="row-label"><i class="bi bi-bank"></i><span>Caja real (banco)</span></span></td>
-      <td class="anio-col"></td>
       ${realArr.map((v) => `<td class="num ${v == null ? 'num-zero' : ''}">${v != null ? PF.fmtNum(v) : '—'}</td>`).join('')}
       <td class="trend-col">${PFCharts.sparkline(realArr.map((v) => v || 0))}</td>
     </tr>`;
@@ -798,7 +783,7 @@
         </div>
         <div class="flujo-table-wrap flujo-scroll">
           <table class="flujo-table">
-            <thead><tr><th class="proj-col">Proyecto</th><th class="anio-col">Año constr.</th>${headCols}<th class="trend-col">Tendencia</th></tr></thead>
+            <thead><tr><th class="proj-col">Proyecto</th>${headCols}<th class="trend-col">Tendencia</th></tr></thead>
             <tbody>${rows}${totalRow}${acumRow}${realRow}</tbody>
           </table>
         </div>
@@ -862,24 +847,6 @@
     }
 
     if (isAdmin()) {
-      el.querySelectorAll('.anio-input').forEach((inp) => {
-        inp.addEventListener('change', async () => {
-          const projId = inp.dataset.projId;
-          const p = state.proyectos.find((x) => x.id === projId);
-          if (!p) return;
-          const val = Number(inp.value) || null;
-          inp.disabled = true;
-          try {
-            const updated = await DB.updateProyecto(projId, { anioConstruccion: val });
-            if (updated) Object.assign(p, updated);
-            renderFlujoMensual();
-          } catch (err) {
-            console.error(err);
-            toast('No se pudo guardar: ' + err.message, 'danger');
-            inp.disabled = false;
-          }
-        });
-      });
       if (!flujoEditMode) {
         el.querySelector('#flujo-edit-toggle').addEventListener('click', () => {
           flujoEditMode = true;
@@ -1809,7 +1776,8 @@
           <div class="fw-semibold text-truncate">${PF.esc(p.nombre)}</div>
           ${estadoBadgeHtml(p.estado)}
         </div>
-        <div class="text-muted small mb-2">${PF.esc(categoriaNombre(p.categoriaId))}${p.tipo ? ' · ' + PF.esc(p.tipo) : ''}</div>
+        <div class="text-muted small mb-2">${PF.esc(categoriaNombre(p.categoriaId))}${p.tipo ? ' · ' + PF.esc(p.tipo) : ''}
+        ${p.anioConstruccion ? ' · año ' + PF.esc(String(p.anioConstruccion)) : ''}</div>
         ${statsRowsHtml(flowStats(p.proyeccion), p.moneda)}
       </div></div>`;
   }
@@ -1956,6 +1924,7 @@
             <span class="text-muted small">${PF.esc(categoriaNombre(p.categoriaId))} · ${p.moneda || state.config.moneda}
             ${p.tipo ? '· ' + PF.esc(p.tipo) : ''}
             ${p.grupoPadre ? '· grupo: ' + PF.esc(p.grupoPadre) : ''}
+            ${p.anioConstruccion ? '· año construcción: ' + PF.esc(String(p.anioConstruccion)) : ''}
             ${p.ultimaImportacion ? '· última importación: ' + PF.esc(p.ultimaImportacion.fileName || '') : ''}</span>
           </div>
           <button class="btn-close" data-bs-dismiss="modal"></button>
@@ -2035,6 +2004,8 @@
               <option value="" ${!proj || !proj.estado ? 'selected' : ''}>Sin definir</option>
               ${ESTADOS_PROYECTO.map((e) => `<option value="${e.id}" ${proj && proj.estado === e.id ? 'selected' : ''}>${PF.esc(e.nombre)}</option>`).join('')}
             </select></div>
+          <div class="mb-2"><label class="form-label small">Año de construcción <span class="text-muted">(opcional — agrupa "Flujo de Obras" en Resumen Directorio)</span></label>
+            <input type="number" class="form-control" id="mp-anio" min="2000" max="2100" value="${isEdit ? anioConstruccionEfectivo(proj) : ''}" placeholder="Ej: 2026"></div>
         </div>
         <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
           <button class="btn btn-primary" id="mp-save">Guardar</button></div>
@@ -2046,10 +2017,11 @@
     wrap.querySelector('#mp-save').addEventListener('click', async () => {
       const nombre = wrap.querySelector('#mp-nombre').value.trim();
       if (!nombre) { toast('Ingresa un nombre', 'warning'); return; }
+      const anioVal = wrap.querySelector('#mp-anio').value;
       const data = {
         nombre, categoriaId: wrap.querySelector('#mp-cat').value, moneda: wrap.querySelector('#mp-moneda').value,
         tipo: wrap.querySelector('#mp-tipo').value.trim(), grupoPadre: wrap.querySelector('#mp-grupo').value.trim() || null,
-        estado: wrap.querySelector('#mp-estado').value || null,
+        estado: wrap.querySelector('#mp-estado').value || null, anioConstruccion: anioVal ? Number(anioVal) : null,
       };
       if (isEdit) await DB.updateProyecto(proj.id, data); else await DB.addProyecto(data);
       await loadAll(); modal.hide(); toast('Proyecto guardado', 'success'); renderProyectos();

@@ -267,22 +267,8 @@ body {
 .flujo-table thead th.proj-col { text-align: left; padding: 10px 14px; text-transform: uppercase; letter-spacing: .5px; border-right: 1px solid var(--pf-border); }
 .flujo-table thead th.month-col { text-align: right; padding: 10px 8px; min-width: 68px; }
 .flujo-table thead th.trend-col { text-align: center; padding: 10px 12px; min-width: 84px; border-left: 1px solid var(--pf-border); text-transform: uppercase; letter-spacing: .5px; }
-.flujo-table thead th.anio-col { text-align: center; padding: 10px 8px; min-width: 88px; border-right: 1px solid var(--pf-border); }
-.flujo-table td.anio-col { text-align: center; padding: 6px 8px; border-right: 1px solid var(--pf-border); }
 .flujo-table td { border-bottom: 1px solid var(--pf-slate-100); }
 .flujo-table td.num { padding: 10px 8px; }
-.anio-input {
-  width: 68px;
-  font-size: 12.5px;
-  font-weight: 600;
-  text-align: center;
-  color: var(--pf-slate-700);
-  padding: 4px 6px;
-  border: 1px solid var(--pf-border);
-  border-radius: 6px;
-}
-.anio-input:focus { border-color: var(--pf-primary); box-shadow: 0 0 0 2px var(--pf-primary-100); outline: none; }
-.anio-badge { font-weight: 600; color: var(--pf-slate-600); }
 .flujo-edit-input {
   width: 100%;
   min-width: 60px;
