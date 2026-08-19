@@ -2905,7 +2905,15 @@
         renderPlanificacion();
       };
       header.addEventListener('click', toggle);
-      header.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+      // El listener de teclado es para poder abrir/cerrar con Enter/Espacio parado en el propio
+      // header (accesibilidad, role="button") — pero como el header ENVUELVE los inputs de fecha
+      // y el de "Encargado", el evento de teclado de esos inputs burbujea hasta acá también. Sin
+      // este guard, escribir un espacio dentro de "Encargado" quedaba interceptado como si fuera
+      // el atajo de teclado para expandir/contraer la tarjeta, y jamás llegaba a escribirse.
+      header.addEventListener('keydown', (e) => {
+        if (e.target !== header && e.target.matches('input, select, textarea')) return;
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+      });
     });
     if (!isAdmin()) return;
     el.querySelectorAll('.plan-del').forEach((btn) => btn.addEventListener('click', async () => {
