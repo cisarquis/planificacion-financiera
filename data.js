@@ -23,13 +23,17 @@
 //   roles/{email}            { role: 'admin'|'lector', nombre, addedAt } — solo lectura desde
 //                            la app; se crea/edita por consola o CLI (ver firestore.rules).
 //   planProyectos/{id}       { nombre, proyectoId:null (por ahora, se agregan a mano por nombre;
-//                              a futuro se vinculará con proyectos/*), promesaCompraventa:
-//                              'YYYY-MM-DD'|null, fechaInicioConstruccion:'YYYY-MM-DD'|null,
-//                              etapas:{ [etapaId]: { inicio, fin, comentario } } } — vista
-//                            "Planificación" (debajo de Programar pagos): seguimiento de etapas
-//                            de negocio de un proyecto. Ver ETAPAS_PLANIFICACION/PLAN_HITO_REGLAS
-//                            en app.js (promesaCompraventa/fechaInicioConstruccion son las 2
-//                            fechas hito que disparan alertas de "debe iniciar N meses antes").
+//                              a futuro se vinculará con proyectos/*), encargado:string|null,
+//                              promesaCompraventa:'YYYY-MM-DD'|null,
+//                              fechaInicioConstruccion:'YYYY-MM-DD'|null,
+//                              etapas:{ [etapaId]: { fin, comentario } } } — vista "Planificación"
+//                            (debajo de Programar pagos): seguimiento de etapas de negocio de un
+//                            proyecto. promesaCompraventa/fechaInicioConstruccion son las 2 únicas
+//                            fechas que se ingresan a mano; el resto de las fechas objetivo de
+//                            cada etapa se calculan solas a partir de esas 2 (ver
+//                            planEtapasObjetivo en app.js). etapas[id].fin es la fecha REAL en
+//                            que se completó esa etapa (también manual), para comparar avance
+//                            real vs. objetivo calculado (planEtapaEstado en app.js).
 // ============================================================================
 
 (function () {
@@ -169,7 +173,7 @@
       const list = this._get('planProyectos', []);
       // proyectoId queda null por ahora: se agregan a mano por nombre libre, sin vincular a un
       // proyecto real de proyectos/* todavía (ver comentario en app.js/renderPlanificacion).
-      const p = { id: uid('plan_'), nombre, proyectoId: null, promesaCompraventa: null, fechaInicioConstruccion: null, etapas: {}, createdAt: Date.now(), updatedAt: Date.now() };
+      const p = { id: uid('plan_'), nombre, proyectoId: null, promesaCompraventa: null, fechaInicioConstruccion: null, encargado: null, etapas: {}, createdAt: Date.now(), updatedAt: Date.now() };
       list.push(p);
       this._set('planProyectos', list);
       return p;
@@ -321,7 +325,7 @@
     },
     async addPlanProyecto(nombre) {
       const { collection, addDoc } = this.fb;
-      const payload = { nombre, proyectoId: null, promesaCompraventa: null, fechaInicioConstruccion: null, etapas: {}, createdAt: Date.now(), updatedAt: Date.now() };
+      const payload = { nombre, proyectoId: null, promesaCompraventa: null, fechaInicioConstruccion: null, encargado: null, etapas: {}, createdAt: Date.now(), updatedAt: Date.now() };
       const ref = await addDoc(collection(this.db, 'planProyectos'), payload);
       return Object.assign({ id: ref.id }, payload);
     },

@@ -161,13 +161,18 @@ evaluación** → **Fecha de lanzamiento** (hito) → **Financiamiento Construcc
 **Actualización evaluación** (se repite) → **MCG** (hito final — llegar ahí significa que el
 proyecto terminó su proceso de evaluación/financiamiento).
 
-Cada tarjeta de proyecto arranca **cerrada** (solo el nombre, el badge de la etapa actual, el
-badge de alertas si tiene, y las 2 fechas ancla) y se expande con clic en el header, igual que
-las filas colapsables de otras vistas — el estado abierto/cerrado se guarda por proyecto en
-`localStorage` (`OPEN_PLAN_KEY`). Los clics dentro de un input de fecha o el botón "Quitar" del
+Cada tarjeta de proyecto arranca **cerrada** (el nombre, el badge de la etapa actual, el nombre
+del encargado si está definido, y el badge de alertas si tiene) y se expande con clic en el
+header, igual que las filas colapsables de otras vistas — el estado abierto/cerrado se guarda por
+proyecto en `localStorage` (`OPEN_PLAN_KEY`). Los clics dentro de un input o el botón "Quitar" del
 header usan `stopPropagation()` para no disparar el toggle sin querer. La lista se ordena por
 `planEtapaActualIdx` (la primera etapa sin `fin` marcado) — los que van más atrás en el proceso
 primero.
+
+Al expandir la tarjeta se ve, además de la tabla de etapas, un campo de texto libre
+**"Encargado"** (`plan.encargado`) — quién del equipo de desarrollo lleva ese proyecto. Es
+puramente informativo (no dispara alertas ni afecta el orden); se guarda igual que las fechas
+ancla, con `DB.updatePlanProyecto`.
 
 **Solo se ingresan 2 fechas a mano por proyecto** (decisión explícita del usuario, para no tener
 que calcular nada manualmente): las "fechas ancla" `promesaCompraventa` y

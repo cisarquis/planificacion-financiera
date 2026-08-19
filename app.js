@@ -2854,8 +2854,13 @@
             <div>
               <h6 class="mb-1 d-flex align-items-center gap-2">${PF.esc(nombre)}
                 <span class="badge text-bg-secondary">${PF.esc(etapaActualTexto)}</span>
+                ${plan.encargado ? `<span class="text-muted small fw-normal"><i class="bi bi-person"></i> ${PF.esc(plan.encargado)}</span>` : ''}
                 ${alertasTotal ? `<span class="badge text-bg-danger">${alertasTotal} alerta${alertasTotal > 1 ? 's' : ''}</span>` : ''}</h6>
               <div class="d-flex align-items-center gap-3 flex-wrap" onclick="event.stopPropagation()">
+                <div class="d-flex align-items-center gap-2">
+                  <label class="text-muted small mb-0">Encargado</label>
+                  <input type="text" class="form-control form-control-sm plan-encargado" data-plan="${plan.id}" style="max-width:170px" value="${PF.esc(plan.encargado || '')}" placeholder="Nombre…" ${isAdmin() ? '' : 'disabled'}>
+                </div>
                 ${PLAN_FECHAS_HITO.map((f) => `<div class="d-flex align-items-center gap-2">
                   <label class="text-muted small mb-0">${PF.esc(f.label)}</label>
                   <input type="date" class="form-control form-control-sm plan-fecha-hito" data-plan="${plan.id}" data-campo="${f.campo}" style="max-width:170px" value="${plan[f.campo] || ''}" ${isAdmin() ? '' : 'disabled'}>
@@ -2914,6 +2919,13 @@
       const plan = state.planProyectos.find((p) => p.id === inp.dataset.plan);
       if (!plan) return;
       const updated = await DB.updatePlanProyecto(plan.id, { [inp.dataset.campo]: inp.value || null });
+      if (updated) Object.assign(plan, updated);
+      renderPlanificacion();
+    }));
+    el.querySelectorAll('.plan-encargado').forEach((inp) => inp.addEventListener('change', async () => {
+      const plan = state.planProyectos.find((p) => p.id === inp.dataset.plan);
+      if (!plan) return;
+      const updated = await DB.updatePlanProyecto(plan.id, { encargado: inp.value.trim() || null });
       if (updated) Object.assign(plan, updated);
       renderPlanificacion();
     }));
