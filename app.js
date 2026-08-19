@@ -2704,10 +2704,15 @@
   // los que pidió el usuario: 1 mes evaluación, 4 meses financiamiento terreno, 2 semanas cada
   // actualización de evaluación, 6 meses financiamiento construcción; MCG no tiene duración
   // (es el hito final, se da por terminado al llegar ahí).
+  // Cada tarjeta de proyecto empieza cerrada (solo el header, con el badge de alertas si las
+  // tiene) — con varios proyectos, mostrar las 6 filas de todos de entrada era demasiado; se
+  // abre haciendo clic en el header, igual que las categorías colapsables de otras vistas.
+  const OPEN_PLAN_KEY = 'pf.planificacion.openProyectos';
   const ETAPAS_PLANIFICACION = [
     { id: 'evaluacion', nombre: 'Evaluación', dias: 30 },
     { id: 'financiamientoTerreno', nombre: 'Financiamiento Terreno', dias: 120 },
     { id: 'actualizacion1', nombre: 'Actualización evaluación', dias: 15 },
+    { id: 'fechaLanzamiento', nombre: 'Fecha de lanzamiento', dias: null },
     { id: 'financiamientoConstruccion', nombre: 'Financiamiento Construcción', dias: 180 },
     { id: 'actualizacion2', nombre: 'Actualización evaluación', dias: 15 },
     { id: 'mcg', nombre: 'MCG', dias: null },
@@ -2769,9 +2774,13 @@
       return;
     }
 
+    const openPlanes = loadOpenMap(OPEN_PLAN_KEY);
     const cardsHtml = state.planProyectos.map((plan) => {
       const nombre = plan.nombre || '(sin nombre)';
+      const isOpen = openPlanes[plan.id] === true;
       let alertasTotal = 0;
+      // Los stats (alertas) se calculan siempre, esté abierta o no la tarjeta, para poder
+      // mostrar el badge de alertas en el header aunque la tabla de etapas esté colapsada.
       const filas = ETAPAS_PLANIFICACION.map((ed, idx) => {
         const e = (plan.etapas || {})[ed.id] || {};
         const alerts = planEtapaAlertas(plan, ed);
@@ -2791,23 +2800,26 @@
       }).join('');
 
       return `<div class="panel">
-        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
-          <div>
-            <h6 class="mb-1 d-flex align-items-center gap-2">${PF.esc(nombre)}
-              ${alertasTotal ? `<span class="badge text-bg-danger">${alertasTotal} alerta${alertasTotal > 1 ? 's' : ''}</span>` : ''}</h6>
-            <div class="d-flex align-items-center gap-2">
-              <label class="text-muted small mb-0">Promesa de compraventa del terreno</label>
-              <input type="date" class="form-control form-control-sm plan-promesa" data-plan="${plan.id}" style="max-width:170px" value="${plan.promesaCompraventa || ''}" ${isAdmin() ? '' : 'disabled'}>
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 plan-card-header" data-plan-toggle="${plan.id}" role="button" tabindex="0" style="cursor:pointer">
+          <div class="d-flex align-items-start gap-2">
+            <i class="bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'} text-muted mt-1"></i>
+            <div>
+              <h6 class="mb-1 d-flex align-items-center gap-2">${PF.esc(nombre)}
+                ${alertasTotal ? `<span class="badge text-bg-danger">${alertasTotal} alerta${alertasTotal > 1 ? 's' : ''}</span>` : ''}</h6>
+              <div class="d-flex align-items-center gap-2" onclick="event.stopPropagation()">
+                <label class="text-muted small mb-0">Promesa de compraventa del terreno</label>
+                <input type="date" class="form-control form-control-sm plan-promesa" data-plan="${plan.id}" style="max-width:170px" value="${plan.promesaCompraventa || ''}" ${isAdmin() ? '' : 'disabled'}>
+              </div>
             </div>
           </div>
-          ${isAdmin() ? `<button class="btn btn-sm btn-outline-danger plan-del" data-plan="${plan.id}"><i class="bi bi-trash"></i> Quitar</button>` : ''}
+          ${isAdmin() ? `<button class="btn btn-sm btn-outline-danger plan-del" data-plan="${plan.id}" onclick="event.stopPropagation()"><i class="bi bi-trash"></i> Quitar</button>` : ''}
         </div>
-        <div class="table-responsive">
+        ${isOpen ? `<div class="table-responsive mt-3">
           <table class="table table-sm plan-table">
             <thead><tr><th style="min-width:190px">Etapa</th><th style="min-width:150px">Inicio</th><th style="min-width:150px">Fin</th><th style="min-width:220px">Comentario</th><th style="min-width:240px">Estado</th></tr></thead>
             <tbody>${filas}</tbody>
           </table>
-        </div>
+        </div>` : ''}
       </div>`;
     }).join('');
 
@@ -2828,6 +2840,17 @@
         renderPlanificacion();
       });
     }
+    el.querySelectorAll('[data-plan-toggle]').forEach((header) => {
+      const toggle = () => {
+        const id = header.dataset.planToggle;
+        const cur = loadOpenMap(OPEN_PLAN_KEY);
+        cur[id] = !(cur[id] === true);
+        saveOpenMap(OPEN_PLAN_KEY, cur);
+        renderPlanificacion();
+      };
+      header.addEventListener('click', toggle);
+      header.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+    });
     if (!isAdmin()) return;
     el.querySelectorAll('.plan-del').forEach((btn) => btn.addEventListener('click', async () => {
       if (!confirm('¿Quitar este proyecto de la planificación? No se borra el proyecto, solo su seguimiento de etapas.')) return;

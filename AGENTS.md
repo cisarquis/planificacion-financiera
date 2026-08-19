@@ -155,11 +155,18 @@ siempre devuelve `'dueño'`, porque quien abre el navegador ya es dueño de sus 
 ## Planificación (etapas de negocio por proyecto)
 
 Vista nueva en el sidebar, justo debajo de "Programar pagos". Hace seguimiento del avance de
-negocio de un proyecto (no del flujo de caja) a través de 6 etapas fijas, definidas en
+negocio de un proyecto (no del flujo de caja) a través de 7 etapas fijas, definidas en
 `ETAPAS_PLANIFICACION` (`app.js`): **Evaluación** (objetivo 1 mes) → **Financiamiento Terreno**
-(4 meses) → **Actualización evaluación** (2 semanas) → **Financiamiento Construcción** (6 meses)
-→ **Actualización evaluación** (2 semanas, se repite) → **MCG** (hito final, sin duración — llegar
-ahí significa que el proyecto terminó su proceso de evaluación/financiamiento).
+(4 meses) → **Actualización evaluación** (2 semanas) → **Fecha de lanzamiento** (hito, sin
+duración) → **Financiamiento Construcción** (6 meses) → **Actualización evaluación** (2 semanas,
+se repite) → **MCG** (hito final, sin duración — llegar ahí significa que el proyecto terminó su
+proceso de evaluación/financiamiento).
+
+Cada tarjeta de proyecto arranca **cerrada** (solo el nombre, el badge de alertas si tiene, y la
+fecha de promesa de compraventa) y se expande con clic en el header, igual que las filas
+colapsables de otras vistas — el estado abierto/cerrado se guarda por proyecto en
+`localStorage` (`OPEN_PLAN_KEY`). Los clics dentro del input de fecha o el botón "Quitar" del
+header usan `stopPropagation()` para no disparar el toggle sin querer.
 
 **Modelo de datos**: colección aparte `planProyectos/{id}` (`{ nombre, proyectoId, promesaCompraventa,
 etapas: { [etapaId]: { inicio, fin, comentario } } }`). **Por decisión explícita del usuario, por
