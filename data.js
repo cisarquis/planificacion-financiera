@@ -22,11 +22,11 @@
 //                            solo para ver/comparar en Resumen Directorio; append-only, no se edita.
 //   roles/{email}            { role: 'admin'|'lector', nombre, addedAt } — solo lectura desde
 //                            la app; se crea/edita por consola o CLI (ver firestore.rules).
-//   planProyectos/{id}       { proyectoId, promesaCompraventa:'YYYY-MM-DD'|null,
-//                              etapas:{ [etapaId]: { inicio, fin, comentario } } } — vista
-//                            "Planificación" (debajo de Programar pagos): seguimiento de etapas
-//                            de proyectos en evaluación. Referencia a un proyecto real por
-//                            proyectoId, no lo duplica. Ver ETAPAS_PLANIFICACION en app.js.
+//   planProyectos/{id}       { nombre, proyectoId:null (por ahora, se agregan a mano por nombre;
+//                              a futuro se vinculará con proyectos/*), promesaCompraventa:
+//                              'YYYY-MM-DD'|null, etapas:{ [etapaId]: { inicio, fin, comentario } } }
+//                            — vista "Planificación" (debajo de Programar pagos): seguimiento de
+//                            etapas de negocio de un proyecto. Ver ETAPAS_PLANIFICACION en app.js.
 // ============================================================================
 
 (function () {
@@ -162,9 +162,11 @@
     async listPlanProyectos() {
       return this._get('planProyectos', []);
     },
-    async addPlanProyecto(proyectoId) {
+    async addPlanProyecto(nombre) {
       const list = this._get('planProyectos', []);
-      const p = { id: uid('plan_'), proyectoId, promesaCompraventa: null, etapas: {}, createdAt: Date.now(), updatedAt: Date.now() };
+      // proyectoId queda null por ahora: se agregan a mano por nombre libre, sin vincular a un
+      // proyecto real de proyectos/* todavía (ver comentario en app.js/renderPlanificacion).
+      const p = { id: uid('plan_'), nombre, proyectoId: null, promesaCompraventa: null, etapas: {}, createdAt: Date.now(), updatedAt: Date.now() };
       list.push(p);
       this._set('planProyectos', list);
       return p;
@@ -314,9 +316,9 @@
       const qs = await getDocs(collection(this.db, 'planProyectos'));
       return qs.docs.map((d) => Object.assign({ id: d.id }, d.data()));
     },
-    async addPlanProyecto(proyectoId) {
+    async addPlanProyecto(nombre) {
       const { collection, addDoc } = this.fb;
-      const payload = { proyectoId, promesaCompraventa: null, etapas: {}, createdAt: Date.now(), updatedAt: Date.now() };
+      const payload = { nombre, proyectoId: null, promesaCompraventa: null, etapas: {}, createdAt: Date.now(), updatedAt: Date.now() };
       const ref = await addDoc(collection(this.db, 'planProyectos'), payload);
       return Object.assign({ id: ref.id }, payload);
     },

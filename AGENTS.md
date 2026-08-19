@@ -152,7 +152,7 @@ siempre devuelve `'dueño'`, porque quien abre el navegador ya es dueño de sus 
 `localStorage` — no tiene sentido pedirle login a sí mismo. `DB.listRoles()` devuelve `[]` y
 `setRole`/`deleteRole` son no-op: el concepto de "otros usuarios" no aplica en modo local.
 
-## Planificación (etapas de proyectos en evaluación)
+## Planificación (etapas de negocio por proyecto)
 
 Vista nueva en el sidebar, justo debajo de "Programar pagos". Hace seguimiento del avance de
 negocio de un proyecto (no del flujo de caja) a través de 6 etapas fijas, definidas en
@@ -161,16 +161,15 @@ negocio de un proyecto (no del flujo de caja) a través de 6 etapas fijas, defin
 → **Actualización evaluación** (2 semanas, se repite) → **MCG** (hito final, sin duración — llegar
 ahí significa que el proyecto terminó su proceso de evaluación/financiamiento).
 
-**Modelo de datos**: colección aparte `planProyectos/{id}` (`{ proyectoId, promesaCompraventa,
-etapas: { [etapaId]: { inicio, fin, comentario } } }`) que **referencia** un proyecto real de
-`proyectos/*` por id, sin duplicar sus datos ni tocar su flujo de caja — por diseño, para que
-borrar un registro de planificación ("Quitar") nunca borre el proyecto real ni su historial. Solo
-se puede **agregar** a planificación un proyecto cuyo `proyecto.estado` (campo separado, editable
-en el diálogo de "Nuevo/Editar proyecto" en "Por proyecto"; valores en `ESTADOS_PROYECTO` de
-`app.js`: `'evaluacion'`/`'ejecucion'`/`'terminado'`, o sin definir) sea `'evaluacion'` — el
-desplegable de "Agregar a planificación" filtra por eso y excluye los que ya están agregados. Una
-vez agregado, sigue visible aunque el proyecto cambie de estado después (no se saca solo, para no
-perder el historial de seguimiento).
+**Modelo de datos**: colección aparte `planProyectos/{id}` (`{ nombre, proyectoId, promesaCompraventa,
+etapas: { [etapaId]: { inicio, fin, comentario } } }`). **Por decisión explícita del usuario, por
+ahora los proyectos se agregan a mano con un nombre libre** (`DB.addPlanProyecto(nombre)`, campo
+`#plan-add-nombre` en la vista) — `proyectoId` queda `null` y no hay ningún vínculo ni filtro
+contra `proyectos/*` todavía. La idea a futuro es conectar cada registro con un proyecto real
+(probablemente filtrando por `proyecto.estado === 'evaluacion'`, ver `ESTADOS_PROYECTO` en
+`app.js`), pero eso quedó pendiente para una iteración posterior — no asumir que ya existe ese
+vínculo. Es una colección aparte y no un campo dentro de `proyectos/*` para que, cuando se
+conecte, borrar un registro de planificación ("Quitar") nunca pueda borrar el proyecto real.
 
 **Alertas** (`planEtapaAlertas`, `app.js`):
 - **Atraso de duración**: si una etapa tiene `inicio` pero no `fin` (sigue abierta) y ya pasaron

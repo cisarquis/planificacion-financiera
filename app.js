@@ -2753,31 +2753,24 @@
 
   function renderPlanificacion() {
     const el = document.getElementById('planificacion');
-    const enEvaluacion = state.proyectos.filter((p) => p.estado === 'evaluacion');
-    const yaAgregados = new Set(state.planProyectos.map((pl) => pl.proyectoId));
-    const disponibles = enEvaluacion.filter((p) => !yaAgregados.has(p.id));
 
     const addBarHtml = isAdmin() ? `
       <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
-        <select class="form-select form-select-sm" id="plan-add-select" style="max-width:320px">
-          <option value="">${disponibles.length ? 'Elegir proyecto en evaluación…' : 'No hay proyectos en evaluación sin agregar'}</option>
-          ${disponibles.map((p) => `<option value="${p.id}">${PF.esc(p.nombre)}</option>`).join('')}
-        </select>
-        <button class="btn btn-sm btn-primary" id="plan-add-btn" ${disponibles.length ? '' : 'disabled'}><i class="bi bi-plus-lg"></i> Agregar a planificación</button>
+        <input type="text" class="form-control form-control-sm" id="plan-add-nombre" style="max-width:320px" placeholder="Nombre del proyecto…">
+        <button class="btn btn-sm btn-primary" id="plan-add-btn"><i class="bi bi-plus-lg"></i> Agregar a planificación</button>
       </div>` : '';
-    const introHtml = `<p class="text-muted small mb-3">Seguimiento de etapas para proyectos <b>en evaluación</b>: evaluación,
-      financiamiento de terreno, actualización, financiamiento de construcción, actualización y MCG.
-      Solo se pueden agregar proyectos cuyo estado (en "Por proyecto") sea "En evaluación".</p>`;
+    const introHtml = `<p class="text-muted small mb-3">Seguimiento de etapas de negocio: evaluación, financiamiento de terreno,
+      actualización, financiamiento de construcción, actualización y MCG. Por ahora los proyectos se agregan a mano con su
+      nombre — más adelante se van a poder vincular con los proyectos del flujo de caja.</p>`;
 
     if (!state.planProyectos.length) {
-      el.innerHTML = introHtml + addBarHtml + emptyState('Sin proyectos en planificación', 'Agrega un proyecto en evaluación para empezar a seguir sus etapas.');
+      el.innerHTML = introHtml + addBarHtml + emptyState('Sin proyectos en planificación', 'Agrega un proyecto a mano para empezar a seguir sus etapas.');
       wirePlanAdd(el);
       return;
     }
 
     const cardsHtml = state.planProyectos.map((plan) => {
-      const proy = state.proyectos.find((p) => p.id === plan.proyectoId);
-      const nombre = proy ? proy.nombre : '(proyecto eliminado)';
+      const nombre = plan.nombre || '(sin nombre)';
       let alertasTotal = 0;
       const filas = ETAPAS_PLANIFICACION.map((ed, idx) => {
         const e = (plan.etapas || {})[ed.id] || {};
@@ -2826,9 +2819,10 @@
     const addBtn = el.querySelector('#plan-add-btn');
     if (addBtn) {
       addBtn.addEventListener('click', async () => {
-        const sel = el.querySelector('#plan-add-select');
-        if (!sel.value) { toast('Elige un proyecto', 'warning'); return; }
-        await DB.addPlanProyecto(sel.value);
+        const inp = el.querySelector('#plan-add-nombre');
+        const nombre = inp.value.trim();
+        if (!nombre) { toast('Ingresa un nombre', 'warning'); return; }
+        await DB.addPlanProyecto(nombre);
         await loadAll();
         toast('Proyecto agregado a planificación', 'success');
         renderPlanificacion();
