@@ -2737,10 +2737,24 @@
     if (dias % 7 === 0) { const n = dias / 7; return n + (n === 1 ? ' semana' : ' semanas'); }
     return dias + ' días';
   }
-  // Alertas de una etapa: atraso de duración (sigue abierta y ya superó los días objetivo) +
-  // la regla especial de Financiamiento Terreno vs. la promesa de compraventa del terreno
-  // (debe iniciar al menos 4 meses antes de esa fecha, ya que además dura 4 meses — así
-  // termina justo cuando se firma la promesa).
+  // Reglas de "debe iniciar N meses antes de una fecha hito" — una por etapa de financiamiento,
+  // cada una atada a una fecha propia del proyecto (fechaField) y a la duración objetivo de esa
+  // etapa (así, en el caso ideal, la etapa termina justo cuando llega la fecha hito):
+  // Financiamiento Terreno debe iniciar 4 meses antes de la promesa de compraventa del terreno,
+  // Financiamiento Construcción 6 meses antes de la fecha de inicio de construcción.
+  const PLAN_HITO_REGLAS = {
+    financiamientoTerreno: { fechaField: 'promesaCompraventa', meses: 4, label: 'la promesa de compraventa del terreno' },
+    financiamientoConstruccion: { fechaField: 'fechaInicioConstruccion', meses: 6, label: 'el inicio de construcción' },
+  };
+  // Fechas hito editables en el header de cada tarjeta (una por regla de PLAN_HITO_REGLAS, mismo
+  // campo) — se recorre esta lista para renderizarlas y para cablear el guardado, así agregar una
+  // regla nueva no requiere tocar el HTML/wiring a mano en dos lugares.
+  const PLAN_FECHAS_HITO = [
+    { campo: 'promesaCompraventa', label: 'Promesa de compraventa del terreno' },
+    { campo: 'fechaInicioConstruccion', label: 'Fecha de inicio de construcción' },
+  ];
+  // Alertas de una etapa: atraso de duración (sigue abierta y ya superó los días objetivo) + la
+  // regla de "debe iniciar N meses antes" si la etapa tiene una (ver PLAN_HITO_REGLAS).
   function planEtapaAlertas(plan, etapaDef) {
     const alerts = [];
     const e = (plan.etapas || {})[etapaDef.id] || {};
@@ -2748,9 +2762,11 @@
       const transcurridos = diasEntre(e.inicio, hoyISO());
       if (transcurridos > etapaDef.dias) alerts.push(`Lleva ${transcurridos} días abierta (objetivo ${etapaDuracionTexto(etapaDef.dias)})`);
     }
-    if (etapaDef.id === 'financiamientoTerreno' && plan.promesaCompraventa) {
-      const objetivo = addMesesISO(plan.promesaCompraventa, -4);
-      if (!e.inicio) alerts.push(`Debe iniciar antes del ${fmtFechaCorta(objetivo)} (4 meses antes de la promesa de compraventa)`);
+    const regla = PLAN_HITO_REGLAS[etapaDef.id];
+    const fechaHito = regla && plan[regla.fechaField];
+    if (regla && fechaHito) {
+      const objetivo = addMesesISO(fechaHito, -regla.meses);
+      if (!e.inicio) alerts.push(`Debe iniciar antes del ${fmtFechaCorta(objetivo)} (${regla.meses} meses antes de ${regla.label})`);
       else if (e.inicio > objetivo) alerts.push(`Inició después de lo recomendado (objetivo: ${fmtFechaCorta(objetivo)})`);
     }
     return alerts;
@@ -2823,9 +2839,11 @@
               <h6 class="mb-1 d-flex align-items-center gap-2">${PF.esc(nombre)}
                 <span class="badge text-bg-secondary">${PF.esc(etapaActualTexto)}</span>
                 ${alertasTotal ? `<span class="badge text-bg-danger">${alertasTotal} alerta${alertasTotal > 1 ? 's' : ''}</span>` : ''}</h6>
-              <div class="d-flex align-items-center gap-2" onclick="event.stopPropagation()">
-                <label class="text-muted small mb-0">Promesa de compraventa del terreno</label>
-                <input type="date" class="form-control form-control-sm plan-promesa" data-plan="${plan.id}" style="max-width:170px" value="${plan.promesaCompraventa || ''}" ${isAdmin() ? '' : 'disabled'}>
+              <div class="d-flex align-items-center gap-3 flex-wrap" onclick="event.stopPropagation()">
+                ${PLAN_FECHAS_HITO.map((f) => `<div class="d-flex align-items-center gap-2">
+                  <label class="text-muted small mb-0">${PF.esc(f.label)}</label>
+                  <input type="date" class="form-control form-control-sm plan-fecha-hito" data-plan="${plan.id}" data-campo="${f.campo}" style="max-width:170px" value="${plan[f.campo] || ''}" ${isAdmin() ? '' : 'disabled'}>
+                </div>`).join('')}
               </div>
             </div>
           </div>
@@ -2876,10 +2894,10 @@
       toast('Quitado de planificación', 'danger');
       renderPlanificacion();
     }));
-    el.querySelectorAll('.plan-promesa').forEach((inp) => inp.addEventListener('change', async () => {
+    el.querySelectorAll('.plan-fecha-hito').forEach((inp) => inp.addEventListener('change', async () => {
       const plan = state.planProyectos.find((p) => p.id === inp.dataset.plan);
       if (!plan) return;
-      const updated = await DB.updatePlanProyecto(plan.id, { promesaCompraventa: inp.value || null });
+      const updated = await DB.updatePlanProyecto(plan.id, { [inp.dataset.campo]: inp.value || null });
       if (updated) Object.assign(plan, updated);
       renderPlanificacion();
     }));

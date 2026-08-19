@@ -181,13 +181,18 @@ conecte, borrar un registro de planificación ("Quitar") nunca pueda borrar el p
 **Alertas** (`planEtapaAlertas`, `app.js`):
 - **Atraso de duración**: si una etapa tiene `inicio` pero no `fin` (sigue abierta) y ya pasaron
   más días que el objetivo de esa etapa, se marca en rojo con "Lleva N días abierta".
-- **Regla de Financiamiento Terreno vs. promesa de compraventa**: cada proyecto tiene un campo
-  `promesaCompraventa` (fecha) editable en la tarjeta. Si está definida, Financiamiento Terreno
-  debe **iniciar al menos 4 meses antes** de esa fecha (y como además dura 4 meses, en el caso
-  ideal termina justo cuando se firma la promesa) — si no tiene `inicio`, o si `inicio` es
-  posterior al objetivo (`promesaCompraventa` − 4 meses), se marca la alerta correspondiente.
+- **Reglas de "debe iniciar N meses antes de una fecha hito"** (`PLAN_HITO_REGLAS`, `app.js` —
+  diccionario etapaId → `{ fechaField, meses, label }`, para no repetir la misma lógica por cada
+  regla): cada proyecto tiene 2 fechas hito editables en el header de su tarjeta
+  (`PLAN_FECHAS_HITO`) — **Promesa de compraventa del terreno** y **Fecha de inicio de
+  construcción**. Si la fecha hito está definida, la etapa asociada debe **iniciar N meses
+  antes** (y como además dura esos mismos N meses, en el caso ideal termina justo cuando llega la
+  fecha hito) — si no tiene `inicio`, o si `inicio` es posterior al objetivo (fecha hito − N
+  meses), se marca la alerta correspondiente:
+  - **Financiamiento Terreno** vs. **Promesa de compraventa del terreno**: 4 meses antes.
+  - **Financiamiento Construcción** vs. **Fecha de inicio de construcción**: 6 meses antes.
 
-Todo editable (fechas, comentario de texto libre por etapa, promesa de compraventa) requiere
+Todo editable (fechas, comentario de texto libre por etapa, las 2 fechas hito) requiere
 `isAdmin()` — un lector ve la vista de solo lectura, inputs deshabilitados. Guardado campo a
 campo con `DB.updatePlanProyecto(id, patch)` (merge parcial, igual que `updateProyecto`), no hay
 modo edición en lote como en Flujo de Caja — no hace falta, son pocos campos por proyecto.
