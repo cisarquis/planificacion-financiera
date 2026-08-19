@@ -2756,6 +2756,17 @@
     return alerts;
   }
 
+  // Índice de la etapa "actual" de un proyecto: la primera que todavía no tiene `fin` (o sea, en
+  // la que está parado hoy). Si todas tienen `fin`, el proyecto ya completó todo el proceso
+  // (índice = ETAPAS_PLANIFICACION.length). Se usa para ordenar la lista de proyectos.
+  function planEtapaActualIdx(plan) {
+    const etapas = plan.etapas || {};
+    for (let i = 0; i < ETAPAS_PLANIFICACION.length; i++) {
+      if (!(etapas[ETAPAS_PLANIFICACION[i].id] || {}).fin) return i;
+    }
+    return ETAPAS_PLANIFICACION.length;
+  }
+
   function renderPlanificacion() {
     const el = document.getElementById('planificacion');
 
@@ -2775,9 +2786,14 @@
     }
 
     const openPlanes = loadOpenMap(OPEN_PLAN_KEY);
-    const cardsHtml = state.planProyectos.map((plan) => {
+    // Ordenados por etapa actual (la primera sin `fin`): los que van más atrás en el proceso
+    // primero, los que ya completaron todo (MCG con fin) al final.
+    const planesOrdenados = state.planProyectos.slice().sort((a, b) => planEtapaActualIdx(a) - planEtapaActualIdx(b));
+    const cardsHtml = planesOrdenados.map((plan) => {
       const nombre = plan.nombre || '(sin nombre)';
       const isOpen = openPlanes[plan.id] === true;
+      const etapaActualIdx = planEtapaActualIdx(plan);
+      const etapaActualTexto = etapaActualIdx >= ETAPAS_PLANIFICACION.length ? 'Completado' : ETAPAS_PLANIFICACION[etapaActualIdx].nombre;
       let alertasTotal = 0;
       // Los stats (alertas) se calculan siempre, esté abierta o no la tarjeta, para poder
       // mostrar el badge de alertas en el header aunque la tabla de etapas esté colapsada.
@@ -2805,6 +2821,7 @@
             <i class="bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'} text-muted mt-1"></i>
             <div>
               <h6 class="mb-1 d-flex align-items-center gap-2">${PF.esc(nombre)}
+                <span class="badge text-bg-secondary">${PF.esc(etapaActualTexto)}</span>
                 ${alertasTotal ? `<span class="badge text-bg-danger">${alertasTotal} alerta${alertasTotal > 1 ? 's' : ''}</span>` : ''}</h6>
               <div class="d-flex align-items-center gap-2" onclick="event.stopPropagation()">
                 <label class="text-muted small mb-0">Promesa de compraventa del terreno</label>
