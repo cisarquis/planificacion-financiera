@@ -2709,6 +2709,7 @@
   // tiene) — con varios proyectos, mostrar las 7 filas de todos de entrada era demasiado; se
   // abre haciendo clic en el header, igual que las categorías colapsables de otras vistas.
   const OPEN_PLAN_KEY = 'pf.planificacion.openProyectos';
+  let planificacionBuscar = '';
   const ETAPAS_PLANIFICACION = [
     { id: 'evaluacion', nombre: 'Evaluación' },
     { id: 'financiamientoTerreno', nombre: 'Financiamiento Terreno' },
@@ -2818,10 +2819,20 @@
       return;
     }
 
+    const DIACRITICS_RE_PLAN = new RegExp('[̀-ͯ]', 'g');
+    const normPlan = (s) => (s || '').toString().normalize('NFD').replace(DIACRITICS_RE_PLAN, '').toLowerCase().trim();
+    const qPlan = normPlan(planificacionBuscar);
+    const searchBarHtml = `<div class="input-group input-group-sm mb-3" style="max-width:320px">
+      <span class="input-group-text"><i class="bi bi-search"></i></span>
+      <input type="text" class="form-control" id="plan-search" placeholder="Buscar proyecto..." value="${PF.esc(planificacionBuscar)}">
+    </div>`;
+
     const openPlanes = loadOpenMap(OPEN_PLAN_KEY);
     // Ordenados por etapa actual (la primera sin `fin`): los que van más atrás en el proceso
     // primero, los que ya completaron todo (MCG con fin) al final.
-    const planesOrdenados = state.planProyectos.slice().sort((a, b) => planEtapaActualIdx(a) - planEtapaActualIdx(b));
+    const planesOrdenados = state.planProyectos.slice()
+      .filter((plan) => !qPlan || normPlan(plan.nombre).includes(qPlan))
+      .sort((a, b) => planEtapaActualIdx(a) - planEtapaActualIdx(b));
     const cardsHtml = planesOrdenados.map((plan) => {
       const nombre = plan.nombre || '(sin nombre)';
       const isOpen = openPlanes[plan.id] === true;
@@ -2879,8 +2890,13 @@
       </div>`;
     }).join('');
 
-    el.innerHTML = introHtml + addBarHtml + cardsHtml;
+    el.innerHTML = introHtml + addBarHtml + searchBarHtml + (cardsHtml || '<div class="text-muted small">Ningún proyecto coincide con la búsqueda.</div>');
     wirePlanAdd(el);
+    const planSearchEl = el.querySelector('#plan-search');
+    if (planSearchEl) {
+      planSearchEl.addEventListener('input', () => { planificacionBuscar = planSearchEl.value; renderPlanificacion(); });
+      if (planificacionBuscar) { planSearchEl.focus(); planSearchEl.setSelectionRange(planSearchEl.value.length, planSearchEl.value.length); }
+    }
   }
 
   function wirePlanAdd(el) {
