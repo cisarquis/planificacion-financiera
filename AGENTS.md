@@ -156,46 +156,64 @@ siempre devuelve `'dueño'`, porque quien abre el navegador ya es dueño de sus 
 
 Vista nueva en el sidebar, justo debajo de "Programar pagos". Hace seguimiento del avance de
 negocio de un proyecto (no del flujo de caja) a través de 7 etapas fijas, definidas en
-`ETAPAS_PLANIFICACION` (`app.js`): **Evaluación** (objetivo 1 mes) → **Financiamiento Terreno**
-(4 meses) → **Actualización evaluación** (2 semanas) → **Fecha de lanzamiento** (hito, sin
-duración) → **Financiamiento Construcción** (6 meses) → **Actualización evaluación** (2 semanas,
-se repite) → **MCG** (hito final, sin duración — llegar ahí significa que el proyecto terminó su
-proceso de evaluación/financiamiento).
+`ETAPAS_PLANIFICACION` (`app.js`): **Evaluación** → **Financiamiento Terreno** → **Actualización
+evaluación** → **Fecha de lanzamiento** (hito) → **Financiamiento Construcción** →
+**Actualización evaluación** (se repite) → **MCG** (hito final — llegar ahí significa que el
+proyecto terminó su proceso de evaluación/financiamiento).
 
-Cada tarjeta de proyecto arranca **cerrada** (solo el nombre, el badge de alertas si tiene, y la
-fecha de promesa de compraventa) y se expande con clic en el header, igual que las filas
-colapsables de otras vistas — el estado abierto/cerrado se guarda por proyecto en
-`localStorage` (`OPEN_PLAN_KEY`). Los clics dentro del input de fecha o el botón "Quitar" del
-header usan `stopPropagation()` para no disparar el toggle sin querer.
+Cada tarjeta de proyecto arranca **cerrada** (solo el nombre, el badge de la etapa actual, el
+badge de alertas si tiene, y las 2 fechas ancla) y se expande con clic en el header, igual que
+las filas colapsables de otras vistas — el estado abierto/cerrado se guarda por proyecto en
+`localStorage` (`OPEN_PLAN_KEY`). Los clics dentro de un input de fecha o el botón "Quitar" del
+header usan `stopPropagation()` para no disparar el toggle sin querer. La lista se ordena por
+`planEtapaActualIdx` (la primera etapa sin `fin` marcado) — los que van más atrás en el proceso
+primero.
 
-**Modelo de datos**: colección aparte `planProyectos/{id}` (`{ nombre, proyectoId, promesaCompraventa,
-etapas: { [etapaId]: { inicio, fin, comentario } } }`). **Por decisión explícita del usuario, por
-ahora los proyectos se agregan a mano con un nombre libre** (`DB.addPlanProyecto(nombre)`, campo
-`#plan-add-nombre` en la vista) — `proyectoId` queda `null` y no hay ningún vínculo ni filtro
-contra `proyectos/*` todavía. La idea a futuro es conectar cada registro con un proyecto real
-(probablemente filtrando por `proyecto.estado === 'evaluacion'`, ver `ESTADOS_PROYECTO` en
-`app.js`), pero eso quedó pendiente para una iteración posterior — no asumir que ya existe ese
-vínculo. Es una colección aparte y no un campo dentro de `proyectos/*` para que, cuando se
-conecte, borrar un registro de planificación ("Quitar") nunca pueda borrar el proyecto real.
+**Solo se ingresan 2 fechas a mano por proyecto** (decisión explícita del usuario, para no tener
+que calcular nada manualmente): las "fechas ancla" `promesaCompraventa` y
+`fechaInicioConstruccion` (`PLAN_FECHAS_HITO`, editables en el header de cada tarjeta). **Todas**
+las demás fechas — el rango objetivo (inicio/fin) de cada una de las 7 etapas — se calculan solas
+a partir de esas 2 anclas y de las duraciones fijas del negocio (`planEtapasObjetivo`, `app.js`):
 
-**Alertas** (`planEtapaAlertas`, `app.js`):
-- **Atraso de duración**: si una etapa tiene `inicio` pero no `fin` (sigue abierta) y ya pasaron
-  más días que el objetivo de esa etapa, se marca en rojo con "Lleva N días abierta".
-- **Reglas de "debe iniciar N meses antes de una fecha hito"** (`PLAN_HITO_REGLAS`, `app.js` —
-  diccionario etapaId → `{ fechaField, meses, label }`, para no repetir la misma lógica por cada
-  regla): cada proyecto tiene 2 fechas hito editables en el header de su tarjeta
-  (`PLAN_FECHAS_HITO`) — **Promesa de compraventa del terreno** y **Fecha de inicio de
-  construcción**. Si la fecha hito está definida, la etapa asociada debe **iniciar N meses
-  antes** (y como además dura esos mismos N meses, en el caso ideal termina justo cuando llega la
-  fecha hito) — si no tiene `inicio`, o si `inicio` es posterior al objetivo (fecha hito − N
-  meses), se marca la alerta correspondiente:
-  - **Financiamiento Terreno** vs. **Promesa de compraventa del terreno**: 4 meses antes.
-  - **Financiamiento Construcción** vs. **Fecha de inicio de construcción**: 6 meses antes.
+```
+Evaluación (1 mes) → Financiamiento Terreno (4 meses, termina justo en la promesa)
+  → Actualización evaluación (2 semanas)
+Fecha de lanzamiento (hito) → Financiamiento Construcción (6 meses, termina justo en el inicio de obra)
+  → Actualización evaluación (2 semanas) → MCG (hito, mismo día que termina esa actualización)
+```
 
-Todo editable (fechas, comentario de texto libre por etapa, las 2 fechas hito) requiere
-`isAdmin()` — un lector ve la vista de solo lectura, inputs deshabilitados. Guardado campo a
-campo con `DB.updatePlanProyecto(id, patch)` (merge parcial, igual que `updateProyecto`), no hay
-modo edición en lote como en Flujo de Caja — no hace falta, son pocos campos por proyecto.
+Cada mitad de la cadena (la que cuelga de `promesaCompraventa` y la que cuelga de
+`fechaInicioConstruccion`) se calcula **de forma independiente** — si las 2 fechas ancla que
+ingresa el usuario no son razonablemente consistentes entre sí (ej. la fecha de inicio de
+construcción cae antes de que la primera mitad termine), las fechas objetivo calculadas pueden
+salir "fuera de orden" entre sí. No hay validación cruzada de eso hoy; se asume que el usuario
+ingresa fechas ancla coherentes con la realidad del proyecto. Si falta una de las 2 fechas ancla,
+las etapas que dependen de ella quedan sin objetivo calculado ("Falta la fecha ancla").
+
+**Lo único que se ingresa a mano etapa por etapa es "Completado el"** (`etapas[etapaId].fin`) —
+la fecha real en que se terminó esa etapa, para poder comparar avance real vs. objetivo calculado
+(`planEtapaEstado`, `app.js`):
+- Sin fecha ancla → no hay objetivo con qué comparar ("Falta la fecha ancla").
+- Completada (`fin` marcado) después del objetivo → alerta "Se completó tarde".
+- Completada a tiempo o antes → "Completada" (verde).
+- No completada y hoy ya pasó la fecha objetivo → alerta "Atrasada".
+- No completada y todavía no se cumple el objetivo → "En plazo".
+
+Todo editable (las 2 fechas ancla, "Completado el" y el comentario de texto libre por etapa)
+requiere `isAdmin()` — un lector ve la vista de solo lectura, inputs deshabilitados. Guardado
+campo a campo con `DB.updatePlanProyecto(id, patch)` (merge parcial, igual que `updateProyecto`),
+no hay modo edición en lote como en Flujo de Caja — no hace falta, son pocos campos por proyecto.
+
+**Modelo de datos**: colección aparte `planProyectos/{id}` (`{ nombre, proyectoId,
+promesaCompraventa, fechaInicioConstruccion, etapas: { [etapaId]: { fin, comentario } } }`).
+**Por decisión explícita del usuario, por ahora los proyectos se agregan a mano con un nombre
+libre** (`DB.addPlanProyecto(nombre)`, campo `#plan-add-nombre` en la vista) — `proyectoId` queda
+`null` y no hay ningún vínculo ni filtro contra `proyectos/*` todavía. La idea a futuro es
+conectar cada registro con un proyecto real (probablemente filtrando por `proyecto.estado ===
+'evaluacion'`, ver `ESTADOS_PROYECTO` en `app.js`), pero eso quedó pendiente para una iteración
+posterior — no asumir que ya existe ese vínculo. Es una colección aparte y no un campo dentro de
+`proyectos/*` para que, cuando se conecte, borrar un registro de planificación ("Quitar") nunca
+pueda borrar el proyecto real.
 
 ## Agrupar proyectos relacionados (`proyecto.grupoPadre`)
 

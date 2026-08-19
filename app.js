@@ -2698,24 +2698,31 @@
   }
 
   // ------------------------------------------------------- Vista: Planificación
-  // Seguimiento de etapas de negocio (evaluación → financiamiento → MCG) para proyectos "en
-  // evaluación" — vive en su propia colección (planProyectos) que solo referencia al proyecto
-  // real por id, sin duplicar ni tocar su flujo de caja. Los "días objetivo" de cada etapa son
-  // los que pidió el usuario: 1 mes evaluación, 4 meses financiamiento terreno, 2 semanas cada
-  // actualización de evaluación, 6 meses financiamiento construcción; MCG no tiene duración
-  // (es el hito final, se da por terminado al llegar ahí).
+  // Seguimiento de etapas de negocio (evaluación → financiamiento → MCG) para un proyecto — vive
+  // en su propia colección (planProyectos) que por ahora no está vinculada a proyectos/*
+  // (ver comentario en renderPlanificacion). El usuario solo ingresa 2 fechas ancla por proyecto
+  // (promesaCompraventa, fechaInicioConstruccion, ver PLAN_FECHAS_HITO) — TODAS las fechas
+  // objetivo de las 7 etapas se calculan solas a partir de esas 2 y de las duraciones fijas del
+  // negocio (ver planEtapasObjetivo). Lo único que se ingresa a mano etapa por etapa es la fecha
+  // real en que se completó ("Completado el"), para poder comparar avance real vs. calculado.
   // Cada tarjeta de proyecto empieza cerrada (solo el header, con el badge de alertas si las
-  // tiene) — con varios proyectos, mostrar las 6 filas de todos de entrada era demasiado; se
+  // tiene) — con varios proyectos, mostrar las 7 filas de todos de entrada era demasiado; se
   // abre haciendo clic en el header, igual que las categorías colapsables de otras vistas.
   const OPEN_PLAN_KEY = 'pf.planificacion.openProyectos';
   const ETAPAS_PLANIFICACION = [
-    { id: 'evaluacion', nombre: 'Evaluación', dias: 30 },
-    { id: 'financiamientoTerreno', nombre: 'Financiamiento Terreno', dias: 120 },
-    { id: 'actualizacion1', nombre: 'Actualización evaluación', dias: 15 },
-    { id: 'fechaLanzamiento', nombre: 'Fecha de lanzamiento', dias: null },
-    { id: 'financiamientoConstruccion', nombre: 'Financiamiento Construcción', dias: 180 },
-    { id: 'actualizacion2', nombre: 'Actualización evaluación', dias: 15 },
-    { id: 'mcg', nombre: 'MCG', dias: null },
+    { id: 'evaluacion', nombre: 'Evaluación' },
+    { id: 'financiamientoTerreno', nombre: 'Financiamiento Terreno' },
+    { id: 'actualizacion1', nombre: 'Actualización evaluación' },
+    { id: 'fechaLanzamiento', nombre: 'Fecha de lanzamiento' },
+    { id: 'financiamientoConstruccion', nombre: 'Financiamiento Construcción' },
+    { id: 'actualizacion2', nombre: 'Actualización evaluación' },
+    { id: 'mcg', nombre: 'MCG' },
+  ];
+  // Fechas hito editables en el header de cada tarjeta — las únicas 2 fechas que se ingresan a
+  // mano en toda la planificación; todo lo demás se deriva de ellas.
+  const PLAN_FECHAS_HITO = [
+    { campo: 'promesaCompraventa', label: 'Promesa de compraventa del terreno' },
+    { campo: 'fechaInicioConstruccion', label: 'Fecha de inicio de construcción' },
   ];
   function hoyISO() { return new Date().toISOString().slice(0, 10); }
   function addMesesISO(iso, meses) {
@@ -2723,58 +2730,65 @@
     d.setMonth(d.getMonth() + meses);
     return d.toISOString().slice(0, 10);
   }
+  function addDiasISO(iso, dias) {
+    const d = new Date(iso + 'T00:00:00');
+    d.setDate(d.getDate() + dias);
+    return d.toISOString().slice(0, 10);
+  }
   function fmtFechaCorta(iso) {
     if (!iso) return '—';
     const [y, m, d] = iso.split('-');
     return `${d}-${m}-${y}`;
   }
-  function diasEntre(a, b) {
-    return Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000);
+  // Calcula la fecha objetivo (inicio/fin) de cada etapa a partir de las 2 fechas ancla del
+  // proyecto — nunca a mano. Encadenamiento (duraciones fijas del negocio, las mismas que pidió
+  // el usuario): Evaluación (1 mes) → Financiamiento Terreno (4 meses, termina justo en la
+  // promesa) → Actualización evaluación (2 semanas) → Fecha de lanzamiento (hito) →
+  // Financiamiento Construcción (6 meses, termina justo en el inicio de obra) → Actualización
+  // evaluación (2 semanas) → MCG (hito final). Cada tramo solo se puede calcular si ya está la
+  // fecha ancla de la que depende — si falta, esa etapa (y las que dependen de ella hacia atrás)
+  // devuelven `undefined`.
+  function planEtapasObjetivo(plan) {
+    const obj = {};
+    const promesa = plan.promesaCompraventa;
+    const inicioConst = plan.fechaInicioConstruccion;
+    if (promesa) {
+      const financiamientoTerreno = { inicio: addMesesISO(promesa, -4), fin: promesa };
+      obj.financiamientoTerreno = financiamientoTerreno;
+      obj.evaluacion = { inicio: addMesesISO(financiamientoTerreno.inicio, -1), fin: financiamientoTerreno.inicio };
+      obj.actualizacion1 = { inicio: promesa, fin: addDiasISO(promesa, 15) };
+    }
+    if (inicioConst) {
+      const financiamientoConstruccion = { inicio: addMesesISO(inicioConst, -6), fin: inicioConst };
+      obj.fechaLanzamiento = { inicio: financiamientoConstruccion.inicio, fin: financiamientoConstruccion.inicio };
+      obj.financiamientoConstruccion = financiamientoConstruccion;
+      const actualizacion2 = { inicio: inicioConst, fin: addDiasISO(inicioConst, 15) };
+      obj.actualizacion2 = actualizacion2;
+      obj.mcg = { inicio: actualizacion2.fin, fin: actualizacion2.fin };
+    }
+    return obj;
   }
-  function etapaDuracionTexto(dias) {
-    if (dias == null) return '';
-    if (dias % 30 === 0) { const n = dias / 30; return n + (n === 1 ? ' mes' : ' meses'); }
-    if (dias % 7 === 0) { const n = dias / 7; return n + (n === 1 ? ' semana' : ' semanas'); }
-    return dias + ' días';
-  }
-  // Reglas de "debe iniciar N meses antes de una fecha hito" — una por etapa de financiamiento,
-  // cada una atada a una fecha propia del proyecto (fechaField) y a la duración objetivo de esa
-  // etapa (así, en el caso ideal, la etapa termina justo cuando llega la fecha hito):
-  // Financiamiento Terreno debe iniciar 4 meses antes de la promesa de compraventa del terreno,
-  // Financiamiento Construcción 6 meses antes de la fecha de inicio de construcción.
-  const PLAN_HITO_REGLAS = {
-    financiamientoTerreno: { fechaField: 'promesaCompraventa', meses: 4, label: 'la promesa de compraventa del terreno' },
-    financiamientoConstruccion: { fechaField: 'fechaInicioConstruccion', meses: 6, label: 'el inicio de construcción' },
-  };
-  // Fechas hito editables en el header de cada tarjeta (una por regla de PLAN_HITO_REGLAS, mismo
-  // campo) — se recorre esta lista para renderizarlas y para cablear el guardado, así agregar una
-  // regla nueva no requiere tocar el HTML/wiring a mano en dos lugares.
-  const PLAN_FECHAS_HITO = [
-    { campo: 'promesaCompraventa', label: 'Promesa de compraventa del terreno' },
-    { campo: 'fechaInicioConstruccion', label: 'Fecha de inicio de construcción' },
-  ];
-  // Alertas de una etapa: atraso de duración (sigue abierta y ya superó los días objetivo) + la
-  // regla de "debe iniciar N meses antes" si la etapa tiene una (ver PLAN_HITO_REGLAS).
-  function planEtapaAlertas(plan, etapaDef) {
-    const alerts = [];
+  // Estado de una etapa: compara la fecha real marcada a mano (`etapas[id].fin`) contra la
+  // objetivo calculada. Sin fecha ancla → no hay nada que comparar. Completada tarde o atrasada
+  // sin completar (hoy ya pasó el objetivo) cuentan como alerta.
+  function planEtapaEstado(plan, etapaDef, objetivo) {
     const e = (plan.etapas || {})[etapaDef.id] || {};
-    if (etapaDef.dias != null && e.inicio && !e.fin) {
-      const transcurridos = diasEntre(e.inicio, hoyISO());
-      if (transcurridos > etapaDef.dias) alerts.push(`Lleva ${transcurridos} días abierta (objetivo ${etapaDuracionTexto(etapaDef.dias)})`);
+    if (!objetivo) return { alerta: false, html: '<span class="text-muted small">Falta la fecha ancla</span>' };
+    if (e.fin) {
+      if (e.fin > objetivo.fin) {
+        return { alerta: true, html: `<div class="plan-alert-badge"><i class="bi bi-exclamation-triangle-fill"></i> Se completó tarde (objetivo: ${fmtFechaCorta(objetivo.fin)})</div>` };
+      }
+      return { alerta: false, html: '<span class="text-success small"><i class="bi bi-check-circle-fill"></i> Completada</span>' };
     }
-    const regla = PLAN_HITO_REGLAS[etapaDef.id];
-    const fechaHito = regla && plan[regla.fechaField];
-    if (regla && fechaHito) {
-      const objetivo = addMesesISO(fechaHito, -regla.meses);
-      if (!e.inicio) alerts.push(`Debe iniciar antes del ${fmtFechaCorta(objetivo)} (${regla.meses} meses antes de ${regla.label})`);
-      else if (e.inicio > objetivo) alerts.push(`Inició después de lo recomendado (objetivo: ${fmtFechaCorta(objetivo)})`);
+    if (hoyISO() > objetivo.fin) {
+      return { alerta: true, html: `<div class="plan-alert-badge"><i class="bi bi-exclamation-triangle-fill"></i> Atrasada (objetivo: ${fmtFechaCorta(objetivo.fin)})</div>` };
     }
-    return alerts;
+    return { alerta: false, html: '<span class="text-muted small">En plazo</span>' };
   }
 
-  // Índice de la etapa "actual" de un proyecto: la primera que todavía no tiene `fin` (o sea, en
-  // la que está parado hoy). Si todas tienen `fin`, el proyecto ya completó todo el proceso
-  // (índice = ETAPAS_PLANIFICACION.length). Se usa para ordenar la lista de proyectos.
+  // Índice de la etapa "actual" de un proyecto: la primera que todavía no tiene `fin` marcado a
+  // mano (o sea, en la que está parado hoy). Si todas tienen `fin`, el proyecto ya completó todo
+  // el proceso (índice = ETAPAS_PLANIFICACION.length). Se usa para ordenar la lista de proyectos.
   function planEtapaActualIdx(plan) {
     const etapas = plan.etapas || {};
     for (let i = 0; i < ETAPAS_PLANIFICACION.length; i++) {
@@ -2792,8 +2806,11 @@
         <button class="btn btn-sm btn-primary" id="plan-add-btn"><i class="bi bi-plus-lg"></i> Agregar a planificación</button>
       </div>` : '';
     const introHtml = `<p class="text-muted small mb-3">Seguimiento de etapas de negocio: evaluación, financiamiento de terreno,
-      actualización, financiamiento de construcción, actualización y MCG. Por ahora los proyectos se agregan a mano con su
-      nombre — más adelante se van a poder vincular con los proyectos del flujo de caja.</p>`;
+      actualización, financiamiento de construcción, actualización y MCG. Solo se ingresan las 2 fechas ancla de cada
+      proyecto (promesa de compraventa del terreno y fecha de inicio de construcción) — el resto de las fechas objetivo se
+      calculan solas. "Completado el" es la única fecha que se marca a mano, etapa por etapa, a medida que se va avanzando.
+      Por ahora los proyectos se agregan a mano con su nombre — más adelante se van a poder vincular con los proyectos del
+      flujo de caja.</p>`;
 
     if (!state.planProyectos.length) {
       el.innerHTML = introHtml + addBarHtml + emptyState('Sin proyectos en planificación', 'Agrega un proyecto a mano para empezar a seguir sus etapas.');
@@ -2813,21 +2830,20 @@
       let alertasTotal = 0;
       // Los stats (alertas) se calculan siempre, esté abierta o no la tarjeta, para poder
       // mostrar el badge de alertas en el header aunque la tabla de etapas esté colapsada.
+      const objetivos = planEtapasObjetivo(plan);
       const filas = ETAPAS_PLANIFICACION.map((ed, idx) => {
         const e = (plan.etapas || {})[ed.id] || {};
-        const alerts = planEtapaAlertas(plan, ed);
-        alertasTotal += alerts.length;
-        const completada = !!e.fin;
-        const rowCls = alerts.length ? 'plan-etapa-alert' : (completada ? 'plan-etapa-done' : '');
-        const estadoHtml = alerts.length
-          ? alerts.map((a) => `<div class="plan-alert-badge"><i class="bi bi-exclamation-triangle-fill"></i> ${PF.esc(a)}</div>`).join('')
-          : (completada ? '<span class="text-success small"><i class="bi bi-check-circle-fill"></i> Completada</span>' : '<span class="text-muted small">—</span>');
+        const objetivo = objetivos[ed.id];
+        const estado = planEtapaEstado(plan, ed, objetivo);
+        if (estado.alerta) alertasTotal++;
+        const rowCls = estado.alerta ? 'plan-etapa-alert' : (e.fin ? 'plan-etapa-done' : '');
+        const objetivoTexto = objetivo ? `${fmtFechaCorta(objetivo.inicio)} → ${fmtFechaCorta(objetivo.fin)}` : '—';
         return `<tr class="${rowCls}">
-          <td>${idx + 1}. ${PF.esc(ed.nombre)}${ed.dias != null ? `<div class="text-muted small">Objetivo: ${etapaDuracionTexto(ed.dias)}</div>` : ''}</td>
-          <td><input type="date" class="form-control form-control-sm plan-fecha" data-plan="${plan.id}" data-etapa="${ed.id}" data-campo="inicio" value="${e.inicio || ''}" ${isAdmin() ? '' : 'disabled'}></td>
-          <td><input type="date" class="form-control form-control-sm plan-fecha" data-plan="${plan.id}" data-etapa="${ed.id}" data-campo="fin" value="${e.fin || ''}" ${isAdmin() ? '' : 'disabled'}></td>
+          <td>${idx + 1}. ${PF.esc(ed.nombre)}</td>
+          <td class="text-muted small">${objetivoTexto}</td>
+          <td><input type="date" class="form-control form-control-sm plan-fecha" data-plan="${plan.id}" data-etapa="${ed.id}" value="${e.fin || ''}" ${isAdmin() ? '' : 'disabled'}></td>
           <td><input type="text" class="form-control form-control-sm plan-comentario" data-plan="${plan.id}" data-etapa="${ed.id}" value="${PF.esc(e.comentario || '')}" placeholder="Comentario…" ${isAdmin() ? '' : 'disabled'}></td>
-          <td>${estadoHtml}</td>
+          <td>${estado.html}</td>
         </tr>`;
       }).join('');
 
@@ -2851,7 +2867,7 @@
         </div>
         ${isOpen ? `<div class="table-responsive mt-3">
           <table class="table table-sm plan-table">
-            <thead><tr><th style="min-width:190px">Etapa</th><th style="min-width:150px">Inicio</th><th style="min-width:150px">Fin</th><th style="min-width:220px">Comentario</th><th style="min-width:240px">Estado</th></tr></thead>
+            <thead><tr><th style="min-width:190px">Etapa</th><th style="min-width:190px">Objetivo (calculado)</th><th style="min-width:150px">Completado el</th><th style="min-width:220px">Comentario</th><th style="min-width:240px">Estado</th></tr></thead>
             <tbody>${filas}</tbody>
           </table>
         </div>` : ''}
@@ -2905,7 +2921,7 @@
       const plan = state.planProyectos.find((p) => p.id === inp.dataset.plan);
       if (!plan) return;
       const etapas = Object.assign({}, plan.etapas);
-      etapas[inp.dataset.etapa] = Object.assign({}, etapas[inp.dataset.etapa], { [inp.dataset.campo]: inp.value || null });
+      etapas[inp.dataset.etapa] = Object.assign({}, etapas[inp.dataset.etapa], { fin: inp.value || null });
       const updated = await DB.updatePlanProyecto(plan.id, { etapas });
       if (updated) Object.assign(plan, updated);
       renderPlanificacion();
