@@ -66,5 +66,10 @@ service cloud.firestore {
       allow create, delete: if isAdmin();
       allow update: if false;
     }
+    // Vista "Planificación": seguimiento de etapas de proyectos en evaluación.
+    match /planProyectos/{id} {
+      allow read: if hasRole();
+      allow write: if isAdmin();
+    }
   }
 }

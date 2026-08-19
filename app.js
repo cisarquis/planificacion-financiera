@@ -93,18 +93,20 @@
     proyectos: [],
     cajaReal: {},
     importLog: [],
+    planProyectos: [],
     currentProyectoId: null,
   };
 
   async function loadAll() {
-    const [config, categorias, proyectos, cajaReal, importLog] = await Promise.all([
-      DB.getConfig(), DB.listCategorias(), DB.listProyectos(), DB.getCajaReal(), DB.listImportLog(),
+    const [config, categorias, proyectos, cajaReal, importLog, planProyectos] = await Promise.all([
+      DB.getConfig(), DB.listCategorias(), DB.listProyectos(), DB.getCajaReal(), DB.listImportLog(), DB.listPlanProyectos(),
     ]);
     state.config = config;
     state.categorias = categorias;
     state.proyectos = proyectos;
     state.cajaReal = cajaReal;
     state.importLog = importLog;
+    state.planProyectos = planProyectos;
     document.getElementById('view-subtitle').textContent = 'Flujo de caja consolidado de proyectos · moneda ' + config.moneda;
     updateTopbarStats();
   }
@@ -234,15 +236,15 @@
     const titles = {
       dashboard: 'Consolidado', 'categorias-view': 'Por categoría', 'flujo-mensual': 'Flujo de Caja',
       'resumen-directorio': 'Resumen Directorio', proyectos: 'Por proyecto', importar: 'Importar Excel',
-      caja: 'Caja del banco', pagos: 'Programar pagos', reportes: 'Reportes', config: 'Configuración',
-      usuarios: 'Usuarios',
+      caja: 'Caja del banco', pagos: 'Programar pagos', planificacion: 'Planificación',
+      reportes: 'Reportes', config: 'Configuración', usuarios: 'Usuarios',
     };
     document.getElementById('view-title').textContent = titles[id] || '';
     const renders = {
       dashboard: renderDashboard, 'categorias-view': renderCategoriasView, 'flujo-mensual': renderFlujoMensual,
       'resumen-directorio': renderResumenDirectorio, proyectos: renderProyectos, importar: renderImportar,
-      caja: renderCaja, pagos: renderPagos, reportes: renderReportes, config: renderConfig,
-      usuarios: renderUsuarios,
+      caja: renderCaja, pagos: renderPagos, planificacion: renderPlanificacion, reportes: renderReportes,
+      config: renderConfig, usuarios: renderUsuarios,
     };
     if (renders[id]) renders[id]();
   }
@@ -2693,6 +2695,177 @@
       });
       PFReports.exportExcel('programacion_pagos.xlsx', 'Pagos', aoa);
     });
+  }
+
+  // ------------------------------------------------------- Vista: Planificación
+  // Seguimiento de etapas de negocio (evaluación → financiamiento → MCG) para proyectos "en
+  // evaluación" — vive en su propia colección (planProyectos) que solo referencia al proyecto
+  // real por id, sin duplicar ni tocar su flujo de caja. Los "días objetivo" de cada etapa son
+  // los que pidió el usuario: 1 mes evaluación, 4 meses financiamiento terreno, 2 semanas cada
+  // actualización de evaluación, 6 meses financiamiento construcción; MCG no tiene duración
+  // (es el hito final, se da por terminado al llegar ahí).
+  const ETAPAS_PLANIFICACION = [
+    { id: 'evaluacion', nombre: 'Evaluación', dias: 30 },
+    { id: 'financiamientoTerreno', nombre: 'Financiamiento Terreno', dias: 120 },
+    { id: 'actualizacion1', nombre: 'Actualización evaluación', dias: 15 },
+    { id: 'financiamientoConstruccion', nombre: 'Financiamiento Construcción', dias: 180 },
+    { id: 'actualizacion2', nombre: 'Actualización evaluación', dias: 15 },
+    { id: 'mcg', nombre: 'MCG', dias: null },
+  ];
+  function hoyISO() { return new Date().toISOString().slice(0, 10); }
+  function addMesesISO(iso, meses) {
+    const d = new Date(iso + 'T00:00:00');
+    d.setMonth(d.getMonth() + meses);
+    return d.toISOString().slice(0, 10);
+  }
+  function fmtFechaCorta(iso) {
+    if (!iso) return '—';
+    const [y, m, d] = iso.split('-');
+    return `${d}-${m}-${y}`;
+  }
+  function diasEntre(a, b) {
+    return Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000);
+  }
+  function etapaDuracionTexto(dias) {
+    if (dias == null) return '';
+    if (dias % 30 === 0) { const n = dias / 30; return n + (n === 1 ? ' mes' : ' meses'); }
+    if (dias % 7 === 0) { const n = dias / 7; return n + (n === 1 ? ' semana' : ' semanas'); }
+    return dias + ' días';
+  }
+  // Alertas de una etapa: atraso de duración (sigue abierta y ya superó los días objetivo) +
+  // la regla especial de Financiamiento Terreno vs. la promesa de compraventa del terreno
+  // (debe iniciar al menos 4 meses antes de esa fecha, ya que además dura 4 meses — así
+  // termina justo cuando se firma la promesa).
+  function planEtapaAlertas(plan, etapaDef) {
+    const alerts = [];
+    const e = (plan.etapas || {})[etapaDef.id] || {};
+    if (etapaDef.dias != null && e.inicio && !e.fin) {
+      const transcurridos = diasEntre(e.inicio, hoyISO());
+      if (transcurridos > etapaDef.dias) alerts.push(`Lleva ${transcurridos} días abierta (objetivo ${etapaDuracionTexto(etapaDef.dias)})`);
+    }
+    if (etapaDef.id === 'financiamientoTerreno' && plan.promesaCompraventa) {
+      const objetivo = addMesesISO(plan.promesaCompraventa, -4);
+      if (!e.inicio) alerts.push(`Debe iniciar antes del ${fmtFechaCorta(objetivo)} (4 meses antes de la promesa de compraventa)`);
+      else if (e.inicio > objetivo) alerts.push(`Inició después de lo recomendado (objetivo: ${fmtFechaCorta(objetivo)})`);
+    }
+    return alerts;
+  }
+
+  function renderPlanificacion() {
+    const el = document.getElementById('planificacion');
+    const enEvaluacion = state.proyectos.filter((p) => p.estado === 'evaluacion');
+    const yaAgregados = new Set(state.planProyectos.map((pl) => pl.proyectoId));
+    const disponibles = enEvaluacion.filter((p) => !yaAgregados.has(p.id));
+
+    const addBarHtml = isAdmin() ? `
+      <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+        <select class="form-select form-select-sm" id="plan-add-select" style="max-width:320px">
+          <option value="">${disponibles.length ? 'Elegir proyecto en evaluación…' : 'No hay proyectos en evaluación sin agregar'}</option>
+          ${disponibles.map((p) => `<option value="${p.id}">${PF.esc(p.nombre)}</option>`).join('')}
+        </select>
+        <button class="btn btn-sm btn-primary" id="plan-add-btn" ${disponibles.length ? '' : 'disabled'}><i class="bi bi-plus-lg"></i> Agregar a planificación</button>
+      </div>` : '';
+    const introHtml = `<p class="text-muted small mb-3">Seguimiento de etapas para proyectos <b>en evaluación</b>: evaluación,
+      financiamiento de terreno, actualización, financiamiento de construcción, actualización y MCG.
+      Solo se pueden agregar proyectos cuyo estado (en "Por proyecto") sea "En evaluación".</p>`;
+
+    if (!state.planProyectos.length) {
+      el.innerHTML = introHtml + addBarHtml + emptyState('Sin proyectos en planificación', 'Agrega un proyecto en evaluación para empezar a seguir sus etapas.');
+      wirePlanAdd(el);
+      return;
+    }
+
+    const cardsHtml = state.planProyectos.map((plan) => {
+      const proy = state.proyectos.find((p) => p.id === plan.proyectoId);
+      const nombre = proy ? proy.nombre : '(proyecto eliminado)';
+      let alertasTotal = 0;
+      const filas = ETAPAS_PLANIFICACION.map((ed, idx) => {
+        const e = (plan.etapas || {})[ed.id] || {};
+        const alerts = planEtapaAlertas(plan, ed);
+        alertasTotal += alerts.length;
+        const completada = !!e.fin;
+        const rowCls = alerts.length ? 'plan-etapa-alert' : (completada ? 'plan-etapa-done' : '');
+        const estadoHtml = alerts.length
+          ? alerts.map((a) => `<div class="plan-alert-badge"><i class="bi bi-exclamation-triangle-fill"></i> ${PF.esc(a)}</div>`).join('')
+          : (completada ? '<span class="text-success small"><i class="bi bi-check-circle-fill"></i> Completada</span>' : '<span class="text-muted small">—</span>');
+        return `<tr class="${rowCls}">
+          <td>${idx + 1}. ${PF.esc(ed.nombre)}${ed.dias != null ? `<div class="text-muted small">Objetivo: ${etapaDuracionTexto(ed.dias)}</div>` : ''}</td>
+          <td><input type="date" class="form-control form-control-sm plan-fecha" data-plan="${plan.id}" data-etapa="${ed.id}" data-campo="inicio" value="${e.inicio || ''}" ${isAdmin() ? '' : 'disabled'}></td>
+          <td><input type="date" class="form-control form-control-sm plan-fecha" data-plan="${plan.id}" data-etapa="${ed.id}" data-campo="fin" value="${e.fin || ''}" ${isAdmin() ? '' : 'disabled'}></td>
+          <td><input type="text" class="form-control form-control-sm plan-comentario" data-plan="${plan.id}" data-etapa="${ed.id}" value="${PF.esc(e.comentario || '')}" placeholder="Comentario…" ${isAdmin() ? '' : 'disabled'}></td>
+          <td>${estadoHtml}</td>
+        </tr>`;
+      }).join('');
+
+      return `<div class="panel">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+          <div>
+            <h6 class="mb-1 d-flex align-items-center gap-2">${PF.esc(nombre)}
+              ${alertasTotal ? `<span class="badge text-bg-danger">${alertasTotal} alerta${alertasTotal > 1 ? 's' : ''}</span>` : ''}</h6>
+            <div class="d-flex align-items-center gap-2">
+              <label class="text-muted small mb-0">Promesa de compraventa del terreno</label>
+              <input type="date" class="form-control form-control-sm plan-promesa" data-plan="${plan.id}" style="max-width:170px" value="${plan.promesaCompraventa || ''}" ${isAdmin() ? '' : 'disabled'}>
+            </div>
+          </div>
+          ${isAdmin() ? `<button class="btn btn-sm btn-outline-danger plan-del" data-plan="${plan.id}"><i class="bi bi-trash"></i> Quitar</button>` : ''}
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm plan-table">
+            <thead><tr><th style="min-width:190px">Etapa</th><th style="min-width:150px">Inicio</th><th style="min-width:150px">Fin</th><th style="min-width:220px">Comentario</th><th style="min-width:240px">Estado</th></tr></thead>
+            <tbody>${filas}</tbody>
+          </table>
+        </div>
+      </div>`;
+    }).join('');
+
+    el.innerHTML = introHtml + addBarHtml + cardsHtml;
+    wirePlanAdd(el);
+  }
+
+  function wirePlanAdd(el) {
+    const addBtn = el.querySelector('#plan-add-btn');
+    if (addBtn) {
+      addBtn.addEventListener('click', async () => {
+        const sel = el.querySelector('#plan-add-select');
+        if (!sel.value) { toast('Elige un proyecto', 'warning'); return; }
+        await DB.addPlanProyecto(sel.value);
+        await loadAll();
+        toast('Proyecto agregado a planificación', 'success');
+        renderPlanificacion();
+      });
+    }
+    if (!isAdmin()) return;
+    el.querySelectorAll('.plan-del').forEach((btn) => btn.addEventListener('click', async () => {
+      if (!confirm('¿Quitar este proyecto de la planificación? No se borra el proyecto, solo su seguimiento de etapas.')) return;
+      await DB.deletePlanProyecto(btn.dataset.plan);
+      await loadAll();
+      toast('Quitado de planificación', 'danger');
+      renderPlanificacion();
+    }));
+    el.querySelectorAll('.plan-promesa').forEach((inp) => inp.addEventListener('change', async () => {
+      const plan = state.planProyectos.find((p) => p.id === inp.dataset.plan);
+      if (!plan) return;
+      const updated = await DB.updatePlanProyecto(plan.id, { promesaCompraventa: inp.value || null });
+      if (updated) Object.assign(plan, updated);
+      renderPlanificacion();
+    }));
+    el.querySelectorAll('.plan-fecha').forEach((inp) => inp.addEventListener('change', async () => {
+      const plan = state.planProyectos.find((p) => p.id === inp.dataset.plan);
+      if (!plan) return;
+      const etapas = Object.assign({}, plan.etapas);
+      etapas[inp.dataset.etapa] = Object.assign({}, etapas[inp.dataset.etapa], { [inp.dataset.campo]: inp.value || null });
+      const updated = await DB.updatePlanProyecto(plan.id, { etapas });
+      if (updated) Object.assign(plan, updated);
+      renderPlanificacion();
+    }));
+    el.querySelectorAll('.plan-comentario').forEach((inp) => inp.addEventListener('change', async () => {
+      const plan = state.planProyectos.find((p) => p.id === inp.dataset.plan);
+      if (!plan) return;
+      const etapas = Object.assign({}, plan.etapas);
+      etapas[inp.dataset.etapa] = Object.assign({}, etapas[inp.dataset.etapa], { comentario: inp.value });
+      const updated = await DB.updatePlanProyecto(plan.id, { etapas });
+      if (updated) Object.assign(plan, updated);
+    }));
   }
 
   // ------------------------------------------------------- Vista: Reportes

@@ -152,6 +152,40 @@ siempre devuelve `'dueño'`, porque quien abre el navegador ya es dueño de sus 
 `localStorage` — no tiene sentido pedirle login a sí mismo. `DB.listRoles()` devuelve `[]` y
 `setRole`/`deleteRole` son no-op: el concepto de "otros usuarios" no aplica en modo local.
 
+## Planificación (etapas de proyectos en evaluación)
+
+Vista nueva en el sidebar, justo debajo de "Programar pagos". Hace seguimiento del avance de
+negocio de un proyecto (no del flujo de caja) a través de 6 etapas fijas, definidas en
+`ETAPAS_PLANIFICACION` (`app.js`): **Evaluación** (objetivo 1 mes) → **Financiamiento Terreno**
+(4 meses) → **Actualización evaluación** (2 semanas) → **Financiamiento Construcción** (6 meses)
+→ **Actualización evaluación** (2 semanas, se repite) → **MCG** (hito final, sin duración — llegar
+ahí significa que el proyecto terminó su proceso de evaluación/financiamiento).
+
+**Modelo de datos**: colección aparte `planProyectos/{id}` (`{ proyectoId, promesaCompraventa,
+etapas: { [etapaId]: { inicio, fin, comentario } } }`) que **referencia** un proyecto real de
+`proyectos/*` por id, sin duplicar sus datos ni tocar su flujo de caja — por diseño, para que
+borrar un registro de planificación ("Quitar") nunca borre el proyecto real ni su historial. Solo
+se puede **agregar** a planificación un proyecto cuyo `proyecto.estado` (campo separado, editable
+en el diálogo de "Nuevo/Editar proyecto" en "Por proyecto"; valores en `ESTADOS_PROYECTO` de
+`app.js`: `'evaluacion'`/`'ejecucion'`/`'terminado'`, o sin definir) sea `'evaluacion'` — el
+desplegable de "Agregar a planificación" filtra por eso y excluye los que ya están agregados. Una
+vez agregado, sigue visible aunque el proyecto cambie de estado después (no se saca solo, para no
+perder el historial de seguimiento).
+
+**Alertas** (`planEtapaAlertas`, `app.js`):
+- **Atraso de duración**: si una etapa tiene `inicio` pero no `fin` (sigue abierta) y ya pasaron
+  más días que el objetivo de esa etapa, se marca en rojo con "Lleva N días abierta".
+- **Regla de Financiamiento Terreno vs. promesa de compraventa**: cada proyecto tiene un campo
+  `promesaCompraventa` (fecha) editable en la tarjeta. Si está definida, Financiamiento Terreno
+  debe **iniciar al menos 4 meses antes** de esa fecha (y como además dura 4 meses, en el caso
+  ideal termina justo cuando se firma la promesa) — si no tiene `inicio`, o si `inicio` es
+  posterior al objetivo (`promesaCompraventa` − 4 meses), se marca la alerta correspondiente.
+
+Todo editable (fechas, comentario de texto libre por etapa, promesa de compraventa) requiere
+`isAdmin()` — un lector ve la vista de solo lectura, inputs deshabilitados. Guardado campo a
+campo con `DB.updatePlanProyecto(id, patch)` (merge parcial, igual que `updateProyecto`), no hay
+modo edición en lote como en Flujo de Caja — no hace falta, son pocos campos por proyecto.
+
 ## Agrupar proyectos relacionados (`proyecto.grupoPadre`)
 
 Algunos proyectos del Excel son en realidad "contenedores" de sub-obras — ej. "Icuadra Sn Bdo 3 y 4"

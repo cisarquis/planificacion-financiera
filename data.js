@@ -22,6 +22,11 @@
 //                            solo para ver/comparar en Resumen Directorio; append-only, no se edita.
 //   roles/{email}            { role: 'admin'|'lector', nombre, addedAt } — solo lectura desde
 //                            la app; se crea/edita por consola o CLI (ver firestore.rules).
+//   planProyectos/{id}       { proyectoId, promesaCompraventa:'YYYY-MM-DD'|null,
+//                              etapas:{ [etapaId]: { inicio, fin, comentario } } } — vista
+//                            "Planificación" (debajo de Programar pagos): seguimiento de etapas
+//                            de proyectos en evaluación. Referencia a un proyecto real por
+//                            proyectoId, no lo duplica. Ver ETAPAS_PLANIFICACION en app.js.
 // ============================================================================
 
 (function () {
@@ -154,6 +159,26 @@
       this._set('snapshots', this._get('snapshots', []).filter((s) => s.id !== id));
     },
 
+    async listPlanProyectos() {
+      return this._get('planProyectos', []);
+    },
+    async addPlanProyecto(proyectoId) {
+      const list = this._get('planProyectos', []);
+      const p = { id: uid('plan_'), proyectoId, promesaCompraventa: null, etapas: {}, createdAt: Date.now(), updatedAt: Date.now() };
+      list.push(p);
+      this._set('planProyectos', list);
+      return p;
+    },
+    async updatePlanProyecto(id, patch) {
+      const list = this._get('planProyectos', []);
+      const i = list.findIndex((p) => p.id === id);
+      if (i >= 0) { list[i] = Object.assign({}, list[i], patch, { updatedAt: Date.now() }); this._set('planProyectos', list); return list[i]; }
+      return null;
+    },
+    async deletePlanProyecto(id) {
+      this._set('planProyectos', this._get('planProyectos', []).filter((p) => p.id !== id));
+    },
+
     // Modo local no tiene login: quien abre el navegador ya es dueño de sus propios datos.
     async getRole() {
       return 'dueño';
@@ -284,6 +309,30 @@
       await deleteDoc(doc(this.db, 'snapshots', id));
     },
 
+    async listPlanProyectos() {
+      const { collection, getDocs } = this.fb;
+      const qs = await getDocs(collection(this.db, 'planProyectos'));
+      return qs.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+    },
+    async addPlanProyecto(proyectoId) {
+      const { collection, addDoc } = this.fb;
+      const payload = { proyectoId, promesaCompraventa: null, etapas: {}, createdAt: Date.now(), updatedAt: Date.now() };
+      const ref = await addDoc(collection(this.db, 'planProyectos'), payload);
+      return Object.assign({ id: ref.id }, payload);
+    },
+    async updatePlanProyecto(id, patch) {
+      const { doc, setDoc } = this.fb;
+      patch = Object.assign({}, patch, { updatedAt: Date.now() });
+      await setDoc(doc(this.db, 'planProyectos', id), patch, { merge: true });
+      const { getDoc } = this.fb;
+      const snap = await getDoc(doc(this.db, 'planProyectos', id));
+      return snap.exists() ? Object.assign({ id: snap.id }, snap.data()) : null;
+    },
+    async deletePlanProyecto(id) {
+      const { doc, deleteDoc } = this.fb;
+      await deleteDoc(doc(this.db, 'planProyectos', id));
+    },
+
     // Rol de un correo (dueño/editor/lector), o null si no tiene documento asignado.
     async getRole(email) {
       const { doc, getDoc } = this.fb;
@@ -353,6 +402,7 @@
     'getCajaReal', 'setCajaRealMes',
     'addImportLog', 'listImportLog',
     'addSnapshot', 'listSnapshots', 'getSnapshot', 'deleteSnapshot',
+    'listPlanProyectos', 'addPlanProyecto', 'updatePlanProyecto', 'deletePlanProyecto',
     'getRole', 'listRoles', 'setRole', 'deleteRole',
   ];
   METHODS.forEach((m) => {
