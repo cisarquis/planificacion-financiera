@@ -449,3 +449,44 @@ body {
 }
 .plan-alert-badge + .plan-alert-badge { margin-top: 3px; }
 .plan-table input[type="date"], .plan-table input[type="text"] { font-size: 12.5px; }
+
+/* ---- Resumen de alertas (arriba de las tarjetas) ---- */
+.plan-alert-summary {
+  display: flex; flex-direction: column; gap: 10px; padding: 14px 18px; margin-bottom: 16px;
+  background: var(--pf-danger-100); border: 1px solid var(--pf-danger-200);
+  border-left: 4px solid var(--pf-danger-600); border-radius: var(--pf-radius-card);
+}
+.plan-alert-summary.ok {
+  flex-direction: row; align-items: center; gap: 8px; background: var(--pf-success-100);
+  border: 1px solid var(--pf-success-200); border-left: 4px solid var(--pf-success-600);
+  color: var(--pf-success-700); font-size: 13px; font-weight: 600;
+}
+.plan-alert-summary-head { display: flex; align-items: center; gap: 8px; color: var(--pf-danger-700); font-size: 14px; }
+.plan-alert-summary-head .bi { font-size: 16px; }
+.plan-alert-summary-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.plan-alert-chip {
+  display: flex; align-items: center; gap: 7px; padding: 5px 10px 5px 12px;
+  background: #fff; border: 1px solid var(--pf-danger-200); border-radius: var(--pf-radius-pill);
+  font-size: 12px; font-weight: 600; color: var(--pf-slate-700); cursor: pointer;
+  transition: box-shadow .12s, border-color .12s;
+}
+.plan-alert-chip:hover { border-color: var(--pf-danger-600); box-shadow: 0 1px 4px rgba(220,38,38,.18); }
+.plan-alert-chip-count {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px;
+  padding: 0 5px; border-radius: var(--pf-radius-pill); background: var(--pf-danger-600); color: #fff;
+  font-size: 10.5px; font-weight: 700;
+}
+
+/* ---- Tarjeta de proyecto: acento, badge de etapa, puntos de progreso ---- */
+.plan-card { border-left: 4px solid var(--pf-slate-200); transition: border-color .15s; }
+.plan-card.has-alert { border-left-color: var(--pf-danger-600); }
+.plan-card-header:hover h6 { color: var(--pf-primary); }
+.plan-stage-badge {
+  display: inline-flex; align-items: center; padding: 3px 10px; border-radius: var(--pf-radius-pill);
+  font-size: 11px; font-weight: 700; background: var(--pf-primary-100); color: var(--pf-primary-700);
+}
+.plan-stage-badge.done { background: var(--pf-success-100); color: var(--pf-success-700); }
+.plan-progress { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
+.plan-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pf-slate-200); flex-shrink: 0; }
+.plan-dot.done { background: var(--pf-success-600); }
+.plan-dot.current { background: var(--pf-primary); box-shadow: 0 0 0 3px var(--pf-primary-100); }

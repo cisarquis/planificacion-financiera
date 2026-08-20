@@ -2828,6 +2828,37 @@
     </div>`;
 
     const openPlanes = loadOpenMap(OPEN_PLAN_KEY);
+
+    // ---- Alertas por proyecto, calculadas una sola vez para TODOS los proyectos (sin filtro de
+    // búsqueda) — sirven tanto para el resumen de arriba como, reutilizadas, para las filas de
+    // cada tarjeta (evita recalcular 2 veces lo mismo).
+    const planInfo = state.planProyectos.map((plan) => {
+      const objetivos = planEtapasObjetivo(plan);
+      const items = ETAPAS_PLANIFICACION.map((ed) => {
+        const e = (plan.etapas || {})[ed.id] || {};
+        return { ed, e, objetivo: objetivos[ed.id], estado: planEtapaEstado(plan, ed, objetivos[ed.id]) };
+      });
+      const alertas = items.filter((it) => it.estado.alerta)
+        .map((it) => `${it.ed.nombre}${it.e.fin ? ' (se completó tarde)' : ' (atrasada)'}`);
+      return { plan, items, alertas };
+    });
+    const planInfoPorId = new Map(planInfo.map((x) => [x.plan.id, x]));
+    const conAlerta = planInfo.filter((x) => x.alertas.length > 0);
+    const totalAlertas = conAlerta.reduce((s, x) => s + x.alertas.length, 0);
+
+    const alertSummaryHtml = conAlerta.length ? `<div class="plan-alert-summary">
+      <div class="plan-alert-summary-head">
+        <i class="bi bi-exclamation-triangle-fill"></i>
+        <span><b>${totalAlertas}</b> alerta${totalAlertas > 1 ? 's' : ''} en <b>${conAlerta.length}</b> de ${state.planProyectos.length} proyecto${state.planProyectos.length === 1 ? '' : 's'}</span>
+      </div>
+      <div class="plan-alert-summary-list">
+        ${conAlerta.map((x) => `<button type="button" class="plan-alert-chip" data-plan-jump="${x.plan.id}" title="${PF.esc(x.alertas.join(' · '))}">
+          <span>${PF.esc(x.plan.nombre || '(sin nombre)')}</span>
+          <span class="plan-alert-chip-count">${x.alertas.length}</span>
+        </button>`).join('')}
+      </div>
+    </div>` : `<div class="plan-alert-summary ok"><i class="bi bi-check-circle-fill"></i> Sin alertas — todas las etapas están en plazo o se completaron a tiempo.</div>`;
+
     // Ordenados por etapa actual (la primera sin `fin`): los que van más atrás en el proceso
     // primero, los que ya completaron todo (MCG con fin) al final.
     const planesOrdenados = state.planProyectos.slice()
@@ -2837,16 +2868,14 @@
       const nombre = plan.nombre || '(sin nombre)';
       const isOpen = openPlanes[plan.id] === true;
       const etapaActualIdx = planEtapaActualIdx(plan);
-      const etapaActualTexto = etapaActualIdx >= ETAPAS_PLANIFICACION.length ? 'Completado' : ETAPAS_PLANIFICACION[etapaActualIdx].nombre;
-      let alertasTotal = 0;
-      // Los stats (alertas) se calculan siempre, esté abierta o no la tarjeta, para poder
-      // mostrar el badge de alertas en el header aunque la tabla de etapas esté colapsada.
-      const objetivos = planEtapasObjetivo(plan);
-      const filas = ETAPAS_PLANIFICACION.map((ed, idx) => {
-        const e = (plan.etapas || {})[ed.id] || {};
-        const objetivo = objetivos[ed.id];
-        const estado = planEtapaEstado(plan, ed, objetivo);
-        if (estado.alerta) alertasTotal++;
+      const completado = etapaActualIdx >= ETAPAS_PLANIFICACION.length;
+      const etapaActualTexto = completado ? 'Completado' : ETAPAS_PLANIFICACION[etapaActualIdx].nombre;
+      const { items, alertas } = planInfoPorId.get(plan.id);
+      const alertasTotal = alertas.length;
+      const dotsHtml = `<div class="plan-progress" title="Etapa ${Math.min(etapaActualIdx + 1, ETAPAS_PLANIFICACION.length)} de ${ETAPAS_PLANIFICACION.length}">
+        ${ETAPAS_PLANIFICACION.map((_, i) => `<span class="plan-dot ${i < etapaActualIdx || completado ? 'done' : (i === etapaActualIdx ? 'current' : '')}"></span>`).join('')}
+      </div>`;
+      const filas = items.map(({ ed, e, objetivo, estado }, idx) => {
         const rowCls = estado.alerta ? 'plan-etapa-alert' : (e.fin ? 'plan-etapa-done' : '');
         const objetivoTexto = objetivo ? `${fmtFechaCorta(objetivo.inicio)} → ${fmtFechaCorta(objetivo.fin)}` : '—';
         return `<tr class="${rowCls}">
@@ -2858,16 +2887,17 @@
         </tr>`;
       }).join('');
 
-      return `<div class="panel">
+      return `<div class="panel plan-card ${alertasTotal ? 'has-alert' : ''}" data-plan-card="${plan.id}">
         <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 plan-card-header" data-plan-toggle="${plan.id}" role="button" tabindex="0" style="cursor:pointer">
           <div class="d-flex align-items-start gap-2">
             <i class="bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'} text-muted mt-1"></i>
             <div>
               <h6 class="mb-1 d-flex align-items-center gap-2">${PF.esc(nombre)}
-                <span class="badge text-bg-secondary">${PF.esc(etapaActualTexto)}</span>
+                <span class="plan-stage-badge ${completado ? 'done' : ''}">${PF.esc(etapaActualTexto)}</span>
                 ${plan.encargado ? `<span class="text-muted small fw-normal"><i class="bi bi-person"></i> ${PF.esc(plan.encargado)}</span>` : ''}
                 ${alertasTotal ? `<span class="badge text-bg-danger">${alertasTotal} alerta${alertasTotal > 1 ? 's' : ''}</span>` : ''}</h6>
-              <div class="d-flex align-items-center gap-3 flex-wrap" onclick="event.stopPropagation()">
+              ${dotsHtml}
+              <div class="d-flex align-items-center gap-3 flex-wrap mt-2" onclick="event.stopPropagation()">
                 <div class="d-flex align-items-center gap-2">
                   <label class="text-muted small mb-0">Encargado</label>
                   <input type="text" class="form-control form-control-sm plan-encargado" data-plan="${plan.id}" style="max-width:170px" value="${PF.esc(plan.encargado || '')}" placeholder="Nombre…" ${isAdmin() ? '' : 'disabled'}>
@@ -2890,13 +2920,23 @@
       </div>`;
     }).join('');
 
-    el.innerHTML = introHtml + addBarHtml + searchBarHtml + (cardsHtml || '<div class="text-muted small">Ningún proyecto coincide con la búsqueda.</div>');
+    el.innerHTML = introHtml + addBarHtml + searchBarHtml + alertSummaryHtml + (cardsHtml || '<div class="text-muted small mt-3">Ningún proyecto coincide con la búsqueda.</div>');
     wirePlanAdd(el);
     const planSearchEl = el.querySelector('#plan-search');
     if (planSearchEl) {
       planSearchEl.addEventListener('input', () => { planificacionBuscar = planSearchEl.value; renderPlanificacion(); });
       if (planificacionBuscar) { planSearchEl.focus(); planSearchEl.setSelectionRange(planSearchEl.value.length, planSearchEl.value.length); }
     }
+    el.querySelectorAll('[data-plan-jump]').forEach((chip) => chip.addEventListener('click', () => {
+      const id = chip.dataset.planJump;
+      const cur = loadOpenMap(OPEN_PLAN_KEY);
+      cur[id] = true;
+      saveOpenMap(OPEN_PLAN_KEY, cur);
+      planificacionBuscar = '';
+      renderPlanificacion();
+      const card = el.querySelector(`[data-plan-card="${CSS.escape(id)}"]`);
+      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }));
   }
 
   function wirePlanAdd(el) {
