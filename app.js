@@ -2710,6 +2710,7 @@
   // abre haciendo clic en el header, igual que las categorías colapsables de otras vistas.
   const OPEN_PLAN_KEY = 'pf.planificacion.openProyectos';
   let planificacionBuscar = '';
+  let planificacionEncargadoFiltro = ''; // '' = todos; si no, el nombre exacto de un encargado
   const ETAPAS_PLANIFICACION = [
     { id: 'evaluacion', nombre: 'Evaluación' },
     { id: 'financiamientoTerreno', nombre: 'Financiamiento Terreno' },
@@ -2821,9 +2822,19 @@
     const DIACRITICS_RE_PLAN = new RegExp('[̀-ͯ]', 'g');
     const normPlan = (s) => (s || '').toString().normalize('NFD').replace(DIACRITICS_RE_PLAN, '').toLowerCase().trim();
     const qPlan = normPlan(planificacionBuscar);
-    const searchBarHtml = `<div class="input-group input-group-sm mb-3" style="max-width:320px">
-      <span class="input-group-text"><i class="bi bi-search"></i></span>
-      <input type="text" class="form-control" id="plan-search" placeholder="Buscar proyecto..." value="${PF.esc(planificacionBuscar)}">
+    // Encargados existentes, para el filtro — si el que estaba seleccionado ya no existe (se
+    // renombró o se quitó el proyecto que lo tenía), el filtro vuelve solo a "Todos".
+    const encargadosPlan = Array.from(new Set(state.planProyectos.map((p) => p.encargado).filter(Boolean))).sort();
+    if (planificacionEncargadoFiltro && !encargadosPlan.includes(planificacionEncargadoFiltro)) planificacionEncargadoFiltro = '';
+    const searchBarHtml = `<div class="d-flex align-items-center gap-2 flex-wrap mb-3">
+      <div class="input-group input-group-sm" style="max-width:320px">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <input type="text" class="form-control" id="plan-search" placeholder="Buscar proyecto..." value="${PF.esc(planificacionBuscar)}">
+      </div>
+      <select class="form-select form-select-sm" id="plan-encargado-filtro" style="max-width:220px">
+        <option value="">Todos los encargados</option>
+        ${encargadosPlan.map((e) => `<option value="${PF.esc(e)}" ${e === planificacionEncargadoFiltro ? 'selected' : ''}>${PF.esc(e)}</option>`).join('')}
+      </select>
     </div>`;
 
     const openPlanes = loadOpenMap(OPEN_PLAN_KEY);
@@ -2862,6 +2873,7 @@
     // primero, los que ya completaron todo (MCG con fin) al final.
     const planesOrdenados = state.planProyectos.slice()
       .filter((plan) => !qPlan || normPlan(plan.nombre).includes(qPlan))
+      .filter((plan) => !planificacionEncargadoFiltro || plan.encargado === planificacionEncargadoFiltro)
       .sort((a, b) => planEtapaActualIdx(a) - planEtapaActualIdx(b));
     const cardsHtml = planesOrdenados.map((plan) => {
       const nombre = plan.nombre || '(sin nombre)';
@@ -2924,8 +2936,12 @@
       </div>`;
     }).join('');
 
-    el.innerHTML = introHtml + addBarHtml + searchBarHtml + alertSummaryHtml + (cardsHtml || '<div class="text-muted small mt-3">Ningún proyecto coincide con la búsqueda.</div>');
+    el.innerHTML = introHtml + addBarHtml + searchBarHtml + alertSummaryHtml + (cardsHtml || '<div class="text-muted small mt-3">Ningún proyecto coincide con el filtro.</div>');
     wirePlanAdd(el);
+    const planEncargadoFiltroEl = el.querySelector('#plan-encargado-filtro');
+    if (planEncargadoFiltroEl) {
+      planEncargadoFiltroEl.addEventListener('change', () => { planificacionEncargadoFiltro = planEncargadoFiltroEl.value; renderPlanificacion(); });
+    }
     const planSearchEl = el.querySelector('#plan-search');
     if (planSearchEl) {
       planSearchEl.addEventListener('input', () => { planificacionBuscar = planSearchEl.value; renderPlanificacion(); });
@@ -2937,6 +2953,7 @@
       cur[id] = true;
       saveOpenMap(OPEN_PLAN_KEY, cur);
       planificacionBuscar = '';
+      planificacionEncargadoFiltro = '';
       renderPlanificacion();
       const card = el.querySelector(`[data-plan-card="${CSS.escape(id)}"]`);
       if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
