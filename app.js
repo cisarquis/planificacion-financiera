@@ -2891,7 +2891,8 @@
           <div class="d-flex align-items-start gap-2">
             <i class="bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'} text-muted mt-1"></i>
             <div>
-              <h6 class="mb-1 d-flex align-items-center gap-2">${PF.esc(nombre)}
+              <h6 class="mb-1 d-flex align-items-center gap-2">
+                <input type="text" class="plan-nombre-input" data-plan="${plan.id}" value="${PF.esc(nombre)}" placeholder="Nombre del proyecto…" ${isAdmin() ? '' : 'disabled'} onclick="event.stopPropagation()">
                 <span class="plan-stage-badge ${completado ? 'done' : ''}">${PF.esc(etapaActualTexto)}</span>
                 ${plan.encargado ? `<span class="text-muted small fw-normal"><i class="bi bi-person"></i> ${PF.esc(plan.encargado)}</span>` : ''}
                 ${alertasTotal ? `<span class="badge text-bg-danger">${alertasTotal} alerta${alertasTotal > 1 ? 's' : ''}</span>` : ''}</h6>
@@ -2980,6 +2981,15 @@
       await DB.deletePlanProyecto(btn.dataset.plan);
       await loadAll();
       toast('Quitado de planificación', 'danger');
+      renderPlanificacion();
+    }));
+    el.querySelectorAll('.plan-nombre-input').forEach((inp) => inp.addEventListener('change', async () => {
+      const plan = state.planProyectos.find((p) => p.id === inp.dataset.plan);
+      if (!plan) return;
+      const nombre = inp.value.trim();
+      if (!nombre) { toast('El nombre no puede quedar vacío', 'warning'); inp.value = plan.nombre || ''; return; }
+      const updated = await DB.updatePlanProyecto(plan.id, { nombre });
+      if (updated) Object.assign(plan, updated);
       renderPlanificacion();
     }));
     el.querySelectorAll('.plan-fecha-hito').forEach((inp) => inp.addEventListener('change', async () => {

@@ -490,3 +490,11 @@ body {
 .plan-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pf-slate-200); flex-shrink: 0; }
 .plan-dot.done { background: var(--pf-success-600); }
 .plan-dot.current { background: var(--pf-primary); box-shadow: 0 0 0 3px var(--pf-primary-100); }
+.plan-nombre-input {
+  border: 1px solid transparent; background: transparent; font-size: 15px; font-weight: 600;
+  color: var(--pf-slate-900); padding: 2px 6px; border-radius: var(--pf-radius-sm);
+  min-width: 120px; max-width: 320px;
+}
+.plan-nombre-input:hover:not(:disabled) { background: var(--pf-slate-50); border-color: var(--pf-slate-200); }
+.plan-nombre-input:focus { background: #fff; border-color: var(--pf-primary); outline: none; box-shadow: 0 0 0 2px var(--pf-primary-100); }
+.plan-nombre-input:disabled { color: var(--pf-slate-900); cursor: default; }
