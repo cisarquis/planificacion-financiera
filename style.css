@@ -490,7 +490,3 @@ body {
 .plan-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pf-slate-200); flex-shrink: 0; }
 .plan-dot.done { background: var(--pf-success-600); }
 .plan-dot.current { background: var(--pf-primary); box-shadow: 0 0 0 3px var(--pf-primary-100); }
-.plan-lanzamiento-info {
-  font-size: 12.5px; font-weight: 600; color: var(--pf-slate-600); background: var(--pf-slate-100);
-  padding: 5px 10px; border-radius: var(--pf-radius-sm);
-}

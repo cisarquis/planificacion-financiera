@@ -2905,10 +2905,10 @@
                   <label class="text-muted small mb-0">${PF.esc(f.label)}</label>
                   <input type="date" class="form-control form-control-sm plan-fecha-hito" data-plan="${plan.id}" data-campo="${f.campo}" style="max-width:170px" value="${plan[f.campo] || ''}" ${isAdmin() ? '' : 'disabled'}>
                 </div>`).join('')}
-                ${fechaLanzamiento ? `<div class="d-flex align-items-center gap-2">
+                <div class="d-flex align-items-center gap-2">
                   <label class="text-muted small mb-0">Fecha de lanzamiento (informativa)</label>
-                  <span class="plan-lanzamiento-info">${fmtFechaCorta(fechaLanzamiento.fin)}</span>
-                </div>` : ''}
+                  <input type="date" class="form-control form-control-sm plan-fecha-hito" data-plan="${plan.id}" data-campo="fechaLanzamiento" style="max-width:170px" value="${plan.fechaLanzamiento || (fechaLanzamiento ? fechaLanzamiento.fin : '')}" ${isAdmin() ? '' : 'disabled'}>
+                </div>
               </div>
             </div>
           </div>
