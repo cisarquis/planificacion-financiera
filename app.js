@@ -2714,7 +2714,6 @@
     { id: 'evaluacion', nombre: 'Evaluación' },
     { id: 'financiamientoTerreno', nombre: 'Financiamiento Terreno' },
     { id: 'actualizacion1', nombre: 'Actualización evaluación' },
-    { id: 'fechaLanzamiento', nombre: 'Fecha de lanzamiento' },
     { id: 'financiamientoConstruccion', nombre: 'Financiamiento Construcción' },
     { id: 'actualizacion2', nombre: 'Actualización evaluación' },
     { id: 'mcg', nombre: 'MCG' },
@@ -2840,7 +2839,7 @@
       });
       const alertas = items.filter((it) => it.estado.alerta)
         .map((it) => `${it.ed.nombre}${it.e.fin ? ' (se completó tarde)' : ' (atrasada)'}`);
-      return { plan, items, alertas };
+      return { plan, items, alertas, fechaLanzamiento: objetivos.fechaLanzamiento };
     });
     const planInfoPorId = new Map(planInfo.map((x) => [x.plan.id, x]));
     const conAlerta = planInfo.filter((x) => x.alertas.length > 0);
@@ -2870,7 +2869,7 @@
       const etapaActualIdx = planEtapaActualIdx(plan);
       const completado = etapaActualIdx >= ETAPAS_PLANIFICACION.length;
       const etapaActualTexto = completado ? 'Completado' : ETAPAS_PLANIFICACION[etapaActualIdx].nombre;
-      const { items, alertas } = planInfoPorId.get(plan.id);
+      const { items, alertas, fechaLanzamiento } = planInfoPorId.get(plan.id);
       const alertasTotal = alertas.length;
       const dotsHtml = `<div class="plan-progress" title="Etapa ${Math.min(etapaActualIdx + 1, ETAPAS_PLANIFICACION.length)} de ${ETAPAS_PLANIFICACION.length}">
         ${ETAPAS_PLANIFICACION.map((_, i) => `<span class="plan-dot ${i < etapaActualIdx || completado ? 'done' : (i === etapaActualIdx ? 'current' : '')}"></span>`).join('')}
@@ -2906,6 +2905,10 @@
                   <label class="text-muted small mb-0">${PF.esc(f.label)}</label>
                   <input type="date" class="form-control form-control-sm plan-fecha-hito" data-plan="${plan.id}" data-campo="${f.campo}" style="max-width:170px" value="${plan[f.campo] || ''}" ${isAdmin() ? '' : 'disabled'}>
                 </div>`).join('')}
+                ${fechaLanzamiento ? `<div class="d-flex align-items-center gap-2">
+                  <label class="text-muted small mb-0">Fecha de lanzamiento (informativa)</label>
+                  <span class="plan-lanzamiento-info">${fmtFechaCorta(fechaLanzamiento.fin)}</span>
+                </div>` : ''}
               </div>
             </div>
           </div>
