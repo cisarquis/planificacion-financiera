@@ -611,7 +611,7 @@ body {
 
 /* ---- Tabla "Estado de avance" (filas flex, no <table>) ---- */
 .plan-avance-table { background: #fff; border: 1px solid var(--pf-border); border-radius: 12px; overflow: hidden; }
-.plan-row { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-bottom: 1px solid var(--pf-slate-100); }
+.plan-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 11px 14px; border-bottom: 1px solid var(--pf-slate-100); }
 .plan-row:last-child { border-bottom: none; }
 .plan-row-head {
   background: var(--pf-slate-50); border-bottom: 1px solid var(--pf-border); padding: 10px 14px;
@@ -649,7 +649,3 @@ body {
 .plan-pill.success { background: #dcfce7; color: #15803d; }
 .plan-pill.danger { background: #fee2e2; color: #b91c1c; }
 
-@media (max-width: 900px) {
-  .plan-avance-table { overflow-x: auto; }
-  .plan-row, .plan-row-head { min-width: 780px; }
-}
