@@ -559,8 +559,12 @@ body {
 }
 
 /* ---- Stepper de 6 etapas ---- */
-.plan-stepper { display: flex; align-items: flex-start; padding: 0 2px; }
-.plan-step { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 9px; }
+/* min-width fijo + overflow-x:auto en vez de flex:1/min-width:0 — en ventanas angostas (ej. con
+   DevTools abierto ocupando media pantalla) 6 columnas flexibles se aplastan hasta el punto de
+   que el texto de la etiqueta deja de verse (queda solo el punto); así, en vez de aplastarse, el
+   stepper completo se desplaza horizontalmente y el texto siempre se puede leer. */
+.plan-stepper { display: flex; align-items: flex-start; padding: 0 2px; overflow-x: auto; }
+.plan-step { flex: 1 1 92px; min-width: 92px; display: flex; flex-direction: column; gap: 9px; }
 .plan-step-line { display: flex; align-items: center; }
 .plan-step-seg { height: 3px; flex: 1; border-radius: 2px; }
 .plan-step-dot {
