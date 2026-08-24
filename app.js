@@ -107,12 +107,14 @@
     state.cajaReal = cajaReal;
     state.importLog = importLog;
     state.planProyectos = planProyectos;
-    document.getElementById('view-subtitle').textContent = 'Flujo de caja consolidado de proyectos · moneda ' + config.moneda;
-    updateTopbarStats();
+    refreshTopbar();
   }
 
-  // Chip de stats del topbar: última importación, nº de proyectos, horizonte en meses.
+  // Chip de stats del topbar: última importación, nº de proyectos, horizonte en meses. Es el
+  // contenido "por defecto" del header — refreshTopbar() decide si se muestra este o el de
+  // Planificación según la vista activa.
   function updateTopbarStats() {
+    document.getElementById('view-subtitle').textContent = 'Flujo de caja consolidado de proyectos · moneda ' + state.config.moneda;
     const el = document.getElementById('topbar-stats');
     if (!el) return;
     if (!state.proyectos.length) { el.innerHTML = ''; return; }
@@ -122,6 +124,34 @@
       <span><span class="live-dot"></span>Última carga: <b>${ultima ? PF.esc(new Date(ultima.importedAt).toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric' })) : '—'}</b></span>
       <span>Proyectos: <b>${state.proyectos.length}</b></span>
       <span>Horizonte: <b>${horizonte} meses</b></span>`;
+  }
+
+  // Header de Planificación: mismo topbar de la app, pero con subtítulo y pill propios (fecha de
+  // hoy, nº de proyectos en planificación, cuántos tienen alguna alerta) en vez de los del flujo
+  // de caja. Recalcula las alertas de forma liviana (sin guardar nada) solo para el conteo.
+  function updatePlanTopbarStats() {
+    const subtitleEl = document.getElementById('view-subtitle');
+    if (subtitleEl) subtitleEl.textContent = 'Seguimiento de etapas de negocio · proyectos en evaluación y gestación';
+    const el = document.getElementById('topbar-stats');
+    if (!el) return;
+    const hoy = new Date().toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric' });
+    const conAlerta = state.planProyectos.filter((plan) => {
+      const objetivos = planEtapasObjetivo(plan);
+      return ETAPAS_PLANIFICACION.some((ed) => planEtapaEstado(plan, ed, objetivos[ed.id]).alerta);
+    }).length;
+    el.innerHTML = `
+      <span><span class="live-dot"></span>Hoy: <b>${PF.esc(hoy)}</b></span>
+      <span>Proyectos: <b>${state.planProyectos.length}</b></span>
+      <span>Con alerta: <b>${conAlerta}</b></span>`;
+  }
+
+  // Decide qué contenido de header mostrar según la vista activa — así el header no se queda
+  // "pegado" en el contenido de Planificación al volver a otra vista, ni al revés después de un
+  // loadAll() disparado mientras se está en Planificación.
+  function refreshTopbar() {
+    const activeView = document.querySelector('.view:not(.d-none)');
+    if (activeView && activeView.id === 'planificacion') updatePlanTopbarStats();
+    else updateTopbarStats();
   }
 
   // ------------------------------------------------------- Cálculos derivados
@@ -247,6 +277,7 @@
       config: renderConfig, usuarios: renderUsuarios,
     };
     if (renders[id]) renders[id]();
+    refreshTopbar();
   }
 
   function wireNav() {
@@ -2741,6 +2772,16 @@
     const [y, m, d] = iso.split('-');
     return `${d}-${m}-${y}`;
   }
+  // Fecha corta para el stepper de tarjeta ("12 abr 26") — distinta de fmtFechaCorta (DD-MM-AAAA)
+  // que se usa en la tabla de detalle, porque acá el espacio es mínimo.
+  function fmtFechaStepper(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso + 'T00:00:00');
+    return d.toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: '2-digit' }).replace('.', '');
+  }
+  // Nombres cortos de las 6 etapas para el stepper (el nombre completo se usa en la tabla de
+  // detalle) — mismo orden que ETAPAS_PLANIFICACION.
+  const PLAN_ETAPA_LABEL_CORTO = ['Evaluación', 'Fin. Terreno', 'Act. evaluación', 'Fin. Construcción', 'Act. evaluación', 'MCG'];
   // Calcula la fecha objetivo (inicio/fin) de cada etapa a partir de las 2 fechas ancla del
   // proyecto — nunca a mano. Encadenamiento (duraciones fijas del negocio, las mismas que pidió
   // el usuario): Evaluación (1 mes) → Financiamiento Terreno (4 meses, termina justo en la
@@ -2798,24 +2839,114 @@
     return ETAPAS_PLANIFICACION.length;
   }
 
+  // ---- Helpers de presentación del rediseño (solo UI — no recalculan nada, solo deciden cómo
+  // pintar lo que ya calculó planEtapasObjetivo/planEtapaEstado/planEtapaActualIdx). ----
+
+  // Pill de estado de una etapa dentro de la tabla "Estado de avance" — misma clasificación que
+  // ya usa planEtapaEstado (reutiliza su `estado.alerta`, no reimplementa la regla), solo cambia
+  // cómo se ve.
+  function planEstadoPillHtml(estado, e, objetivo) {
+    if (!objetivo) return '<span class="plan-pill muted"><span class="plan-pill-dot"></span>Falta fecha ancla</span>';
+    if (e.fin) {
+      if (estado.alerta) return '<span class="plan-pill danger"><span class="plan-pill-dot"></span>Se completó tarde</span>';
+      return '<span class="plan-pill success"><span class="plan-pill-dot"></span>Completada</span>';
+    }
+    if (estado.alerta) return `<span class="plan-pill danger"><span class="plan-pill-dot"></span>Atrasada · objetivo ${fmtFechaCorta(objetivo.fin)}</span>`;
+    return '<span class="plan-pill muted"><span class="plan-pill-dot"></span>En plazo</span>';
+  }
+
+  // Stepper de 6 etapas de una tarjeta: nodo + línea a cada lado, coloreados según si el tramo ya
+  // se recorrió (y si esa etapa quedó en alerta) o todavía no.
+  function planStepperHtml(items, etapaActualIdx) {
+    const segColor = (it) => (it.estado.alerta ? '#fca5a5' : (it.e.fin ? '#93c5fd' : '#e2e8f0'));
+    return `<div class="plan-stepper">${items.map((it, i) => {
+      const dotState = it.estado.alerta ? 'alert' : (it.e.fin ? 'done' : (i === etapaActualIdx ? 'current' : 'pending'));
+      const leftColor = i === 0 ? 'transparent' : segColor(items[i - 1]);
+      const rightColor = i === items.length - 1 ? 'transparent' : segColor(it);
+      return `<div class="plan-step">
+        <div class="plan-step-line">
+          <span class="plan-step-seg" style="background:${leftColor}"></span>
+          <span class="plan-step-dot ${dotState}"><span class="plan-step-core"></span></span>
+          <span class="plan-step-seg" style="background:${rightColor}"></span>
+        </div>
+        <div class="plan-step-label ${dotState}">${PF.esc(PLAN_ETAPA_LABEL_CORTO[i] || it.ed.nombre)}</div>
+        <div class="plan-step-date">${it.objetivo ? fmtFechaStepper(it.objetivo.fin) : '—'}</div>
+      </div>`;
+    }).join('')}</div>`;
+  }
+
+  // Panel expandido de una tarjeta: "Datos del proyecto" (3 fechas) + "Estado de avance" (filas
+  // flex, no <table>) — mismas clases/inputs que ya wireaba wirePlanAdd, solo cambia el markup.
+  function planExpandedPanelHtml(plan, items, fechaLanzamientoCalc) {
+    const anclas = [
+      { campo: 'promesaCompraventa', label: 'Promesa compraventa terreno', nota: 'Ancla de las etapas 1 – 3', dashed: false,
+        value: plan.promesaCompraventa || '' },
+      { campo: 'fechaInicioConstruccion', label: 'Inicio de construcción', nota: 'Ancla de las etapas 4 – 6', dashed: false,
+        value: plan.fechaInicioConstruccion || '' },
+      { campo: 'fechaLanzamiento', label: 'Fecha de lanzamiento', nota: 'Informativa · no genera alertas', dashed: true,
+        value: plan.fechaLanzamiento || (fechaLanzamientoCalc ? fechaLanzamientoCalc.fin : '') },
+    ];
+    const anclasHtml = anclas.map((c) => `<div class="plan-ancla-card ${c.dashed ? 'dashed' : ''}">
+      <div class="plan-ancla-dot ${c.dashed ? 'dashed' : ''}"></div>
+      <div class="plan-ancla-title">${PF.esc(c.label)}</div>
+      <input type="date" class="form-control form-control-sm plan-fecha-hito" data-plan="${plan.id}" data-campo="${c.campo}" value="${c.value}" ${isAdmin() ? '' : 'disabled'}>
+      <div class="plan-ancla-nota">${PF.esc(c.nota)}</div>
+    </div>`).join('');
+
+    const filasHtml = items.map(({ ed, e, objetivo, estado }, idx) => {
+      const rowCls = estado.alerta ? 'alert' : (e.fin ? 'done' : '');
+      const numCls = estado.alerta ? 'alert' : (e.fin ? 'done' : '');
+      const objetivoTexto = objetivo ? `${fmtFechaCorta(objetivo.inicio)} → ${fmtFechaCorta(objetivo.fin)}` : 'Falta fecha ancla';
+      return `<div class="plan-row ${rowCls}">
+        <div class="plan-col plan-col-etapa"><span class="plan-num ${numCls}">${idx + 1}</span><span class="plan-etapa-nombre">${PF.esc(ed.nombre)}</span></div>
+        <div class="plan-col plan-col-objetivo">${objetivoTexto}</div>
+        <div class="plan-col plan-col-completado"><input type="date" class="plan-fecha" data-plan="${plan.id}" data-etapa="${ed.id}" value="${e.fin || ''}" ${isAdmin() ? '' : 'disabled'}></div>
+        <div class="plan-col plan-col-comentario"><input type="text" class="plan-comentario" data-plan="${plan.id}" data-etapa="${ed.id}" value="${PF.esc(e.comentario || '')}" placeholder="Comentario…" ${isAdmin() ? '' : 'disabled'}></div>
+        <div class="plan-col plan-col-estado">${planEstadoPillHtml(estado, e, objetivo)}</div>
+      </div>`;
+    }).join('');
+
+    return `<div class="plan-expanded">
+      <div class="plan-section-title">Datos del proyecto</div>
+      <div class="plan-anclas-grid">${anclasHtml}</div>
+      <div class="plan-section-title">Estado de avance</div>
+      <div class="plan-avance-table">
+        <div class="plan-row plan-row-head">
+          <div class="plan-col plan-col-etapa">Etapa</div>
+          <div class="plan-col plan-col-objetivo">Objetivo calculado</div>
+          <div class="plan-col plan-col-completado">Completado el</div>
+          <div class="plan-col plan-col-comentario">Comentario</div>
+          <div class="plan-col plan-col-estado">Estado</div>
+        </div>
+        ${filasHtml}
+      </div>
+    </div>`;
+  }
+
   function renderPlanificacion() {
     const el = document.getElementById('planificacion');
 
-    const addBarHtml = isAdmin() ? `
-      <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
-        <input type="text" class="form-control form-control-sm" id="plan-add-nombre" style="max-width:320px" placeholder="Nombre del proyecto…">
-        <button class="btn btn-sm btn-primary" id="plan-add-btn"><i class="bi bi-plus-lg"></i> Agregar a planificación</button>
+    const addFieldHtml = isAdmin() ? `<div class="plan-toolbar-field">
+        <div class="plan-toolbar-label">Nuevo proyecto</div>
+        <div class="plan-toolbar-row">
+          <input type="text" class="plan-toolbar-input" id="plan-add-nombre" placeholder="Nombre del proyecto…" style="width:220px">
+          <button type="button" class="plan-toolbar-btn primary" id="plan-add-btn"><i class="bi bi-plus-lg"></i> Agregar</button>
+        </div>
       </div>` : '';
-    const introHtml = `<p class="text-muted small mb-3">Seguimiento de etapas de negocio: evaluación, financiamiento de terreno,
-      actualización, financiamiento de construcción, actualización y MCG. Solo se ingresan las 2 fechas ancla de cada
-      proyecto (promesa de compraventa del terreno y fecha de inicio de construcción) — el resto de las fechas objetivo se
-      calculan solas. "Completado el" es la única fecha que se marca a mano, etapa por etapa, a medida que se va avanzando.
-      Por ahora los proyectos se agregan a mano con su nombre — más adelante se van a poder vincular con los proyectos del
-      flujo de caja.</p>`;
 
     if (!state.planProyectos.length) {
-      el.innerHTML = introHtml + addBarHtml + emptyState('Sin proyectos en planificación', 'Agrega un proyecto a mano para empezar a seguir sus etapas.');
+      const toolbarVacio = `<div class="plan-toolbar">
+        <div class="plan-toolbar-info">
+          <div class="plan-toolbar-label">Cómo funciona</div>
+          <p>Solo se ingresan <b>2 fechas ancla</b> por proyecto (promesa de compraventa del terreno y fecha de inicio de
+            construcción); el resto de las fechas objetivo de las 6 etapas se calculan solas. <b>Completado el</b> es la
+            única fecha que se marca a mano, etapa por etapa.</p>
+        </div>
+        ${addFieldHtml}
+      </div>`;
+      el.innerHTML = toolbarVacio + emptyState('Sin proyectos en planificación', 'Agrega un proyecto a mano para empezar a seguir sus etapas.');
       wirePlanAdd(el);
+      refreshTopbar();
       return;
     }
 
@@ -2826,22 +2957,11 @@
     // renombró o se quitó el proyecto que lo tenía), el filtro vuelve solo a "Todos".
     const encargadosPlan = Array.from(new Set(state.planProyectos.map((p) => p.encargado).filter(Boolean))).sort();
     if (planificacionEncargadoFiltro && !encargadosPlan.includes(planificacionEncargadoFiltro)) planificacionEncargadoFiltro = '';
-    const searchBarHtml = `<div class="d-flex align-items-center gap-2 flex-wrap mb-3">
-      <div class="input-group input-group-sm" style="max-width:320px">
-        <span class="input-group-text"><i class="bi bi-search"></i></span>
-        <input type="text" class="form-control" id="plan-search" placeholder="Buscar proyecto..." value="${PF.esc(planificacionBuscar)}">
-      </div>
-      <select class="form-select form-select-sm" id="plan-encargado-filtro" style="max-width:220px">
-        <option value="">Todos los encargados</option>
-        ${encargadosPlan.map((e) => `<option value="${PF.esc(e)}" ${e === planificacionEncargadoFiltro ? 'selected' : ''}>${PF.esc(e)}</option>`).join('')}
-      </select>
-    </div>`;
 
     const openPlanes = loadOpenMap(OPEN_PLAN_KEY);
 
-    // ---- Alertas por proyecto, calculadas una sola vez para TODOS los proyectos (sin filtro de
-    // búsqueda) — sirven tanto para el resumen de arriba como, reutilizadas, para las filas de
-    // cada tarjeta (evita recalcular 2 veces lo mismo).
+    // ---- Info por proyecto, calculada una sola vez para TODOS (sin filtro de búsqueda) —
+    // sirve para el resumen de arriba, el orden de la lista y las filas de cada tarjeta.
     const planInfo = state.planProyectos.map((plan) => {
       const objetivos = planEtapasObjetivo(plan);
       const items = ETAPAS_PLANIFICACION.map((ed) => {
@@ -2856,25 +2976,67 @@
     const conAlerta = planInfo.filter((x) => x.alertas.length > 0);
     const totalAlertas = conAlerta.reduce((s, x) => s + x.alertas.length, 0);
 
-    const alertSummaryHtml = conAlerta.length ? `<div class="plan-alert-summary">
-      <div class="plan-alert-summary-head">
-        <i class="bi bi-exclamation-triangle-fill"></i>
-        <span><b>${totalAlertas}</b> alerta${totalAlertas > 1 ? 's' : ''} en <b>${conAlerta.length}</b> de ${state.planProyectos.length} proyecto${state.planProyectos.length === 1 ? '' : 's'}</span>
-      </div>
-      <div class="plan-alert-summary-list">
-        ${conAlerta.map((x) => `<button type="button" class="plan-alert-chip" data-plan-jump="${x.plan.id}" title="${PF.esc(x.alertas.join(' · '))}">
-          <span>${PF.esc(x.plan.nombre || '(sin nombre)')}</span>
-          <span class="plan-alert-chip-count">${x.alertas.length}</span>
-        </button>`).join('')}
-      </div>
-    </div>` : `<div class="plan-alert-summary ok"><i class="bi bi-check-circle-fill"></i> Sin alertas — todas las etapas están en plazo o se completaron a tiempo.</div>`;
-
-    // Ordenados por etapa actual (la primera sin `fin`): los que van más atrás en el proceso
-    // primero, los que ya completaron todo (MCG con fin) al final.
+    // Orden: más alertas primero, luego los más atrás en el proceso, luego por nombre.
     const planesOrdenados = state.planProyectos.slice()
       .filter((plan) => !qPlan || normPlan(plan.nombre).includes(qPlan))
       .filter((plan) => !planificacionEncargadoFiltro || plan.encargado === planificacionEncargadoFiltro)
-      .sort((a, b) => planEtapaActualIdx(a) - planEtapaActualIdx(b));
+      .sort((a, b) => {
+        const da = planInfoPorId.get(a.id).alertas.length, db = planInfoPorId.get(b.id).alertas.length;
+        if (db !== da) return db - da;
+        const ia = planEtapaActualIdx(a), ib = planEtapaActualIdx(b);
+        if (ia !== ib) return ia - ib;
+        return (a.nombre || '').localeCompare(b.nombre || '');
+      });
+    const allOpenNow = planesOrdenados.length > 0 && planesOrdenados.every((p) => openPlanes[p.id] === true);
+
+    const toolbarHtml = `<div class="plan-toolbar">
+      <div class="plan-toolbar-info">
+        <div class="plan-toolbar-label">Cómo funciona</div>
+        <p>Solo se ingresan <b>2 fechas ancla</b> por proyecto (promesa de compraventa del terreno y fecha de inicio de
+          construcción); el resto de las fechas objetivo de las 6 etapas se calculan solas. <b>Completado el</b> es la
+          única fecha que se marca a mano, etapa por etapa.</p>
+      </div>
+      ${addFieldHtml}
+      <div class="plan-toolbar-field">
+        <div class="plan-toolbar-label">Buscar</div>
+        <input type="text" class="plan-toolbar-input" id="plan-search" placeholder="Buscar proyecto…" style="width:190px" value="${PF.esc(planificacionBuscar)}">
+      </div>
+      <div class="plan-toolbar-field">
+        <div class="plan-toolbar-label">Encargado</div>
+        <select class="plan-toolbar-input" id="plan-encargado-filtro" style="min-width:180px">
+          <option value="">Todos los encargados</option>
+          ${encargadosPlan.map((e) => `<option value="${PF.esc(e)}" ${e === planificacionEncargadoFiltro ? 'selected' : ''}>${PF.esc(e)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="plan-toolbar-field">
+        <div class="plan-toolbar-label">Vista</div>
+        <button type="button" class="plan-toolbar-btn" id="plan-toggle-all">${allOpenNow ? 'Colapsar todo' : 'Expandir todo'}</button>
+      </div>
+    </div>`;
+
+    const alertBannerHtml = conAlerta.length ? `<div class="plan-alert-banner danger">
+      <div class="plan-alert-rail"></div>
+      <div class="plan-alert-content">
+        <div class="plan-alert-icon"><i class="bi bi-exclamation-triangle-fill"></i></div>
+        <div class="plan-alert-text">
+          <div class="plan-alert-title">${totalAlertas} alerta${totalAlertas > 1 ? 's' : ''} en ${conAlerta.length} de ${state.planProyectos.length} proyecto${state.planProyectos.length === 1 ? '' : 's'}</div>
+          <div class="plan-alert-sub">Etapas con fecha objetivo vencida o completadas fuera de plazo</div>
+        </div>
+        <div class="plan-alert-chips">
+          ${conAlerta.map((x) => `<button type="button" class="plan-alert-chip" data-plan-jump="${x.plan.id}" title="${PF.esc(x.alertas.join(' · '))}">
+            <span>${PF.esc(x.plan.nombre || '(sin nombre)')}</span>
+            <span class="plan-alert-chip-count">${x.alertas.length}</span>
+          </button>`).join('')}
+        </div>
+      </div>
+    </div>` : `<div class="plan-alert-banner ok">
+      <div class="plan-alert-rail"></div>
+      <div class="plan-alert-content">
+        <div class="plan-alert-icon"><i class="bi bi-check-circle-fill"></i></div>
+        <div class="plan-alert-text"><div class="plan-alert-title">Todos los proyectos en plazo</div></div>
+      </div>
+    </div>`;
+
     const cardsHtml = planesOrdenados.map((plan) => {
       const nombre = plan.nombre || '(sin nombre)';
       const isOpen = openPlanes[plan.id] === true;
@@ -2883,61 +3045,33 @@
       const etapaActualTexto = completado ? 'Completado' : ETAPAS_PLANIFICACION[etapaActualIdx].nombre;
       const { items, alertas, fechaLanzamiento } = planInfoPorId.get(plan.id);
       const alertasTotal = alertas.length;
-      const dotsHtml = `<div class="plan-progress" title="Etapa ${Math.min(etapaActualIdx + 1, ETAPAS_PLANIFICACION.length)} de ${ETAPAS_PLANIFICACION.length}">
-        ${ETAPAS_PLANIFICACION.map((_, i) => `<span class="plan-dot ${i < etapaActualIdx || completado ? 'done' : (i === etapaActualIdx ? 'current' : '')}"></span>`).join('')}
-      </div>`;
-      const filas = items.map(({ ed, e, objetivo, estado }, idx) => {
-        const rowCls = estado.alerta ? 'plan-etapa-alert' : (e.fin ? 'plan-etapa-done' : '');
-        const objetivoTexto = objetivo ? `${fmtFechaCorta(objetivo.inicio)} → ${fmtFechaCorta(objetivo.fin)}` : '—';
-        return `<tr class="${rowCls}">
-          <td>${idx + 1}. ${PF.esc(ed.nombre)}</td>
-          <td class="text-muted small">${objetivoTexto}</td>
-          <td><input type="date" class="form-control form-control-sm plan-fecha" data-plan="${plan.id}" data-etapa="${ed.id}" value="${e.fin || ''}" ${isAdmin() ? '' : 'disabled'}></td>
-          <td><input type="text" class="form-control form-control-sm plan-comentario" data-plan="${plan.id}" data-etapa="${ed.id}" value="${PF.esc(e.comentario || '')}" placeholder="Comentario…" ${isAdmin() ? '' : 'disabled'}></td>
-          <td>${estado.html}</td>
-        </tr>`;
-      }).join('');
+      const railCls = alertasTotal ? 'alert' : (completado ? 'done' : 'progress');
 
-      return `<div class="panel plan-card ${alertasTotal ? 'has-alert' : ''}" data-plan-card="${plan.id}">
-        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 plan-card-header" data-plan-toggle="${plan.id}" role="button" tabindex="0" style="cursor:pointer">
-          <div class="d-flex align-items-start gap-2">
-            <i class="bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'} text-muted mt-1"></i>
-            <div>
-              <h6 class="mb-1 d-flex align-items-center gap-2">
-                <input type="text" class="plan-nombre-input" data-plan="${plan.id}" value="${PF.esc(nombre)}" placeholder="Nombre del proyecto…" ${isAdmin() ? '' : 'disabled'} onclick="event.stopPropagation()">
-                <span class="plan-stage-badge ${completado ? 'done' : ''}">${PF.esc(etapaActualTexto)}</span>
-                ${plan.encargado ? `<span class="text-muted small fw-normal"><i class="bi bi-person"></i> ${PF.esc(plan.encargado)}</span>` : ''}
-                ${alertasTotal ? `<span class="badge text-bg-danger">${alertasTotal} alerta${alertasTotal > 1 ? 's' : ''}</span>` : ''}</h6>
-              ${dotsHtml}
-              <div class="d-flex align-items-center gap-3 flex-wrap mt-2" onclick="event.stopPropagation()">
-                <div class="d-flex align-items-center gap-2">
-                  <label class="text-muted small mb-0">Encargado</label>
-                  <input type="text" class="form-control form-control-sm plan-encargado" data-plan="${plan.id}" style="max-width:170px" value="${PF.esc(plan.encargado || '')}" placeholder="Nombre…" ${isAdmin() ? '' : 'disabled'}>
-                </div>
-                ${PLAN_FECHAS_HITO.map((f) => `<div class="d-flex align-items-center gap-2">
-                  <label class="text-muted small mb-0">${PF.esc(f.label)}</label>
-                  <input type="date" class="form-control form-control-sm plan-fecha-hito" data-plan="${plan.id}" data-campo="${f.campo}" style="max-width:170px" value="${plan[f.campo] || ''}" ${isAdmin() ? '' : 'disabled'}>
-                </div>`).join('')}
-                <div class="d-flex align-items-center gap-2">
-                  <label class="text-muted small mb-0">Fecha de lanzamiento (informativa)</label>
-                  <input type="date" class="form-control form-control-sm plan-fecha-hito" data-plan="${plan.id}" data-campo="fechaLanzamiento" style="max-width:170px" value="${plan.fechaLanzamiento || (fechaLanzamiento ? fechaLanzamiento.fin : '')}" ${isAdmin() ? '' : 'disabled'}>
-                </div>
-              </div>
-            </div>
+      return `<div class="panel plan-card ${railCls}" data-plan-card="${plan.id}">
+        <div class="plan-card-rail"></div>
+        ${isAdmin() ? `<button type="button" class="plan-card-remove" data-plan="${plan.id}" onclick="event.stopPropagation()"><i class="bi bi-trash"></i> Quitar</button>` : ''}
+        <div class="plan-card-header" data-plan-toggle="${plan.id}" role="button" tabindex="0">
+          <div class="plan-card-row1">
+            <span class="plan-chevron ${isOpen ? 'open' : ''}"><i class="bi bi-chevron-right"></i></span>
+            <input type="text" class="plan-nombre-input" data-plan="${plan.id}" value="${PF.esc(nombre)}" placeholder="Nombre del proyecto…" ${isAdmin() ? '' : 'disabled'} onclick="event.stopPropagation()">
+            <span class="plan-stage-badge ${completado ? 'done' : ''}">${PF.esc(etapaActualTexto)}</span>
+            <span class="plan-encargado-pill" onclick="event.stopPropagation()">
+              <i class="bi bi-person"></i>
+              <input type="text" class="plan-encargado" data-plan="${plan.id}" value="${PF.esc(plan.encargado || '')}" placeholder="Sin encargado" ${isAdmin() ? '' : 'disabled'}>
+            </span>
+            ${alertasTotal ? `<span class="plan-header-alert"><i class="bi bi-exclamation-triangle-fill"></i> ${alertasTotal} alerta${alertasTotal > 1 ? 's' : ''}</span>` : ''}
+            <span class="plan-avance-text">${Math.min(etapaActualIdx, ETAPAS_PLANIFICACION.length)} de ${ETAPAS_PLANIFICACION.length} etapas</span>
           </div>
-          ${isAdmin() ? `<button class="btn btn-sm btn-outline-danger plan-del" data-plan="${plan.id}" onclick="event.stopPropagation()"><i class="bi bi-trash"></i> Quitar</button>` : ''}
+          ${planStepperHtml(items, etapaActualIdx)}
         </div>
-        ${isOpen ? `<div class="table-responsive mt-3">
-          <table class="table table-sm plan-table">
-            <thead><tr><th style="min-width:190px">Etapa</th><th style="min-width:190px">Objetivo (calculado)</th><th style="min-width:150px">Completado el</th><th style="min-width:220px">Comentario</th><th style="min-width:240px">Estado</th></tr></thead>
-            <tbody>${filas}</tbody>
-          </table>
-        </div>` : ''}
+        ${isOpen ? planExpandedPanelHtml(plan, items, fechaLanzamiento) : ''}
       </div>`;
     }).join('');
 
-    el.innerHTML = introHtml + addBarHtml + searchBarHtml + alertSummaryHtml + (cardsHtml || '<div class="text-muted small mt-3">Ningún proyecto coincide con el filtro.</div>');
+    el.innerHTML = toolbarHtml + alertBannerHtml + (cardsHtml || '<div class="text-muted small mt-3">Ningún proyecto coincide con el filtro.</div>');
     wirePlanAdd(el);
+    refreshTopbar();
+
     const planEncargadoFiltroEl = el.querySelector('#plan-encargado-filtro');
     if (planEncargadoFiltroEl) {
       planEncargadoFiltroEl.addEventListener('change', () => { planificacionEncargadoFiltro = planEncargadoFiltroEl.value; renderPlanificacion(); });
@@ -2946,6 +3080,16 @@
     if (planSearchEl) {
       planSearchEl.addEventListener('input', () => { planificacionBuscar = planSearchEl.value; renderPlanificacion(); });
       if (planificacionBuscar) { planSearchEl.focus(); planSearchEl.setSelectionRange(planSearchEl.value.length, planSearchEl.value.length); }
+    }
+    const toggleAllBtn = el.querySelector('#plan-toggle-all');
+    if (toggleAllBtn) {
+      toggleAllBtn.addEventListener('click', () => {
+        const cur = loadOpenMap(OPEN_PLAN_KEY);
+        const target = !allOpenNow;
+        planesOrdenados.forEach((p) => { cur[p.id] = target; });
+        saveOpenMap(OPEN_PLAN_KEY, cur);
+        renderPlanificacion();
+      });
     }
     el.querySelectorAll('[data-plan-jump]').forEach((chip) => chip.addEventListener('click', () => {
       const id = chip.dataset.planJump;
@@ -2956,7 +3100,10 @@
       planificacionEncargadoFiltro = '';
       renderPlanificacion();
       const card = el.querySelector(`[data-plan-card="${CSS.escape(id)}"]`);
-      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (card) {
+        const top = card.getBoundingClientRect().top + window.scrollY - 20;
+        window.scrollTo({ top, behavior: 'smooth' });
+      }
     }));
   }
 
@@ -2993,7 +3140,7 @@
       });
     });
     if (!isAdmin()) return;
-    el.querySelectorAll('.plan-del').forEach((btn) => btn.addEventListener('click', async () => {
+    el.querySelectorAll('.plan-card-remove').forEach((btn) => btn.addEventListener('click', async () => {
       if (!confirm('¿Quitar este proyecto de la planificación? No se borra el proyecto, solo su seguimiento de etapas.')) return;
       await DB.deletePlanProyecto(btn.dataset.plan);
       await loadAll();
