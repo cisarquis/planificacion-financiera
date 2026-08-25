@@ -2860,7 +2860,9 @@
   function planStepperHtml(items, etapaActualIdx) {
     const segColor = (it) => (it.estado.alerta ? '#fca5a5' : (it.e.fin ? '#93c5fd' : '#e2e8f0'));
     return `<div class="plan-stepper">${items.map((it, i) => {
-      const dotState = it.estado.alerta ? 'alert' : (it.e.fin ? 'done' : (i === etapaActualIdx ? 'current' : 'pending'));
+      // "is-alert" (no "alert" a secas): Bootstrap trae su propia clase .alert con
+      // padding/margen/borde propios que se cuelan si se usa el nombre pelado.
+      const dotState = it.estado.alerta ? 'is-alert' : (it.e.fin ? 'done' : (i === etapaActualIdx ? 'current' : 'pending'));
       const leftColor = i === 0 ? 'transparent' : segColor(items[i - 1]);
       const rightColor = i === items.length - 1 ? 'transparent' : segColor(it);
       return `<div class="plan-step">
@@ -2894,8 +2896,8 @@
     </div>`).join('');
 
     const filasHtml = items.map(({ ed, e, objetivo, estado }, idx) => {
-      const rowCls = estado.alerta ? 'alert' : (e.fin ? 'done' : '');
-      const numCls = estado.alerta ? 'alert' : (e.fin ? 'done' : '');
+      const rowCls = estado.alerta ? 'is-alert' : (e.fin ? 'done' : '');
+      const numCls = estado.alerta ? 'is-alert' : (e.fin ? 'done' : '');
       const objetivoTexto = objetivo ? `${fmtFechaCorta(objetivo.inicio)} → ${fmtFechaCorta(objetivo.fin)}` : 'Falta fecha ancla';
       return `<div class="plan-row ${rowCls}">
         <div class="plan-col plan-col-etapa"><span class="plan-num ${numCls}">${idx + 1}</span><span class="plan-etapa-nombre">${PF.esc(ed.nombre)}</span></div>
@@ -3045,7 +3047,9 @@
       const etapaActualTexto = completado ? 'Completado' : ETAPAS_PLANIFICACION[etapaActualIdx].nombre;
       const { items, alertas, fechaLanzamiento } = planInfoPorId.get(plan.id);
       const alertasTotal = alertas.length;
-      const railCls = alertasTotal ? 'alert' : (completado ? 'done' : 'progress');
+      // Prefijo "plan-state-": "alert"/"progress" a secas chocan con clases propias de Bootstrap
+      // (.alert, .progress) que traen su propio height/overflow y aplastaban la tarjeta.
+      const railCls = alertasTotal ? 'plan-state-alert' : (completado ? 'plan-state-done' : 'plan-state-progress');
 
       return `<div class="panel plan-card ${railCls}" data-plan-card="${plan.id}">
         <div class="plan-card-rail"></div>

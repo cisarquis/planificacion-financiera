@@ -508,9 +508,9 @@ body {
 /* ---- Tarjeta de proyecto ---- */
 .plan-card { position: relative; overflow: hidden; padding: 0; margin-bottom: 12px; }
 .plan-card-rail { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: #cbd5e1; }
-.plan-card.alert .plan-card-rail { background: #dc2626; }
-.plan-card.done .plan-card-rail { background: #16a34a; }
-.plan-card.progress .plan-card-rail { background: #3b82f6; }
+.plan-card.plan-state-alert .plan-card-rail { background: #dc2626; }
+.plan-card.plan-state-done .plan-card-rail { background: #16a34a; }
+.plan-card.plan-state-progress .plan-card-rail { background: #3b82f6; }
 .plan-card-remove {
   position: absolute; top: 15px; right: 16px; background: #fff; border: 1px solid var(--pf-border);
   border-radius: 9px; padding: 6px 12px; font-size: 12.5px; font-weight: 600; color: var(--pf-slate-500);
@@ -573,14 +573,14 @@ body {
 }
 .plan-step-dot.done { background: #16a34a; }
 .plan-step-dot.current { background: #3b82f6; box-shadow: 0 0 0 4px rgba(59,130,246,.18); }
-.plan-step-dot.alert { background: #dc2626; box-shadow: 0 0 0 4px rgba(220,38,38,.14); }
+.plan-step-dot.is-alert { background: #dc2626; box-shadow: 0 0 0 4px rgba(220,38,38,.14); }
 .plan-step-core { width: 4px; height: 4px; border-radius: 50%; }
 .plan-step-dot.done .plan-step-core { background: #dcfce7; }
 .plan-step-dot.current .plan-step-core { background: #dbeafe; }
 .plan-step-label { text-align: center; font-size: 11.5px; line-height: 1.3; color: var(--pf-slate-400); font-weight: 600; }
 .plan-step-label.current { color: #1d4ed8; font-weight: 700; }
 .plan-step-label.done { color: var(--pf-slate-700); }
-.plan-step-label.alert { color: #b91c1c; font-weight: 700; }
+.plan-step-label.is-alert { color: #b91c1c; font-weight: 700; }
 .plan-step-date { text-align: center; font-size: 10.5px; color: var(--pf-slate-400); font-variant-numeric: tabular-nums; }
 
 /* ---- Panel expandido ---- */
@@ -618,7 +618,7 @@ body {
   text-transform: uppercase; font-size: 10.5px; font-weight: 700; color: var(--pf-slate-500); letter-spacing: .6px;
 }
 .plan-row.done { background: #f6fef9; }
-.plan-row.alert { background: #fef2f2; }
+.plan-row.is-alert { background: #fef2f2; }
 .plan-col-etapa { flex: 1 1 230px; min-width: 150px; display: flex; align-items: center; gap: 10px; }
 .plan-col-objetivo { flex: 0 1 190px; min-width: 120px; font-size: 12.5px; color: var(--pf-slate-500); font-variant-numeric: tabular-nums; }
 .plan-col-completado { flex: 0 1 140px; min-width: 110px; }
@@ -629,7 +629,7 @@ body {
   font-size: 11.5px; font-weight: 700; background: var(--pf-slate-100); color: var(--pf-slate-500);
 }
 .plan-num.done { background: #dcfce7; color: #15803d; }
-.plan-num.alert { background: #fee2e2; color: #b91c1c; }
+.plan-num.is-alert { background: #fee2e2; color: #b91c1c; }
 .plan-etapa-nombre { font-size: 13.5px; font-weight: 600; color: var(--pf-slate-800); }
 .plan-col-completado .plan-fecha {
   border: 1px solid var(--pf-border); background: #fff; border-radius: 8px; padding: 6px 8px; font-size: 12.5px; width: 100%;
