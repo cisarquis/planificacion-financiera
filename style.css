@@ -609,6 +609,31 @@ body {
 .plan-ancla-card input[type="date"]:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.18); background: #fff; }
 .plan-ancla-nota { font-size: 11px; color: var(--pf-slate-400); }
 
+/* ---- Línea de crédito (monto + confirmación), dentro de la tarjeta de fecha ancla ---- */
+.plan-linea-block { border-top: 1px dashed var(--pf-border); margin-top: 4px; padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.plan-linea-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.plan-linea-label { font-size: 11.5px; font-weight: 650; color: var(--pf-slate-600); }
+.plan-linea-status {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px;
+  padding: 2px 8px; border-radius: var(--pf-radius-pill); white-space: nowrap;
+  background: var(--pf-warning-100); color: var(--pf-warning-700);
+}
+.plan-linea-status.confirmed { background: #dcfce7; color: #15803d; }
+.plan-linea-row { display: flex; gap: 6px; }
+.plan-linea-monto {
+  flex: 1; min-width: 0; border: 1px solid var(--pf-border); background: var(--pf-slate-50); border-radius: 9px;
+  padding: 7px 10px; font-size: 13px; color: var(--pf-slate-800); font-variant-numeric: tabular-nums;
+}
+.plan-linea-monto:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.18); background: #fff; }
+.plan-linea-monto:disabled { background: #fff; color: var(--pf-slate-700); font-weight: 650; }
+.plan-linea-btn {
+  flex-shrink: 0; background: #fff; border: 1px solid var(--pf-border); border-radius: 9px; padding: 0 12px;
+  font-size: 12px; font-weight: 650; color: var(--pf-slate-600); cursor: pointer;
+}
+.plan-linea-btn:hover { border-color: var(--pf-slate-300); }
+.plan-linea-btn.primary { background: var(--pf-primary); border-color: var(--pf-primary); color: #fff; }
+.plan-linea-btn.primary:hover { background: var(--pf-primary-700); }
+
 /* ---- Tabla "Estado de avance" (filas flex, no <table>) ---- */
 .plan-avance-table { background: #fff; border: 1px solid var(--pf-border); border-radius: 12px; overflow: hidden; }
 .plan-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 11px 14px; border-bottom: 1px solid var(--pf-slate-100); }

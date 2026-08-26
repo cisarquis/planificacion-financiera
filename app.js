@@ -2879,12 +2879,36 @@
 
   // Panel expandido de una tarjeta: "Datos del proyecto" (3 fechas) + "Estado de avance" (filas
   // flex, no <table>) — mismas clases/inputs que ya wireaba wirePlanAdd, solo cambia el markup.
+  // Línea de crédito bancaria (terreno/construcción) asociada a una fecha ancla: monto que se
+  // ingresa como estimación y que, cuando el banco la entrega, hay que confirmar tal cual o
+  // corregir. No dispara alertas ni afecta las etapas — es puramente informativo, igual que la
+  // fecha de lanzamiento.
+  function planLineaHtml(plan, cfg) {
+    const monto = plan[cfg.montoCampo];
+    const montoTxt = (monto === null || monto === undefined) ? '' : monto;
+    const confirmada = !!plan[cfg.confCampo];
+    const puedeEditarMonto = isAdmin() && !confirmada;
+    return `<div class="plan-linea-block">
+      <div class="plan-linea-head">
+        <span class="plan-linea-label">${PF.esc(cfg.label)}</span>
+        <span class="plan-linea-status ${confirmada ? 'confirmed' : 'pending'}">${confirmada ? 'Confirmada' : 'Pendiente de confirmar'}</span>
+      </div>
+      <div class="plan-linea-row">
+        <input type="number" step="0.01" class="plan-linea-monto" data-plan="${plan.id}" data-campo="${cfg.montoCampo}"
+          value="${montoTxt}" placeholder="Monto (${PF.esc(state.config.moneda || 'UF')})" ${puedeEditarMonto ? '' : 'disabled'}>
+        ${isAdmin() ? (confirmada
+          ? `<button type="button" class="plan-linea-btn" data-plan="${plan.id}" data-campo-conf="${cfg.confCampo}" data-accion="editar">Editar</button>`
+          : `<button type="button" class="plan-linea-btn primary" data-plan="${plan.id}" data-campo-conf="${cfg.confCampo}" data-monto-campo="${cfg.montoCampo}" data-accion="confirmar">Confirmar</button>`) : ''}
+      </div>
+    </div>`;
+  }
+
   function planExpandedPanelHtml(plan, items, fechaLanzamientoCalc) {
     const anclas = [
       { campo: 'promesaCompraventa', label: 'Promesa compraventa terreno', nota: 'Ancla de las etapas 1 – 3', dashed: false,
-        value: plan.promesaCompraventa || '' },
+        value: plan.promesaCompraventa || '', linea: { montoCampo: 'lineaTerrenoMonto', confCampo: 'lineaTerrenoConfirmada', label: 'Línea de terreno' } },
       { campo: 'fechaInicioConstruccion', label: 'Inicio de construcción', nota: 'Ancla de las etapas 4 – 6', dashed: false,
-        value: plan.fechaInicioConstruccion || '' },
+        value: plan.fechaInicioConstruccion || '', linea: { montoCampo: 'lineaConstruccionMonto', confCampo: 'lineaConstruccionConfirmada', label: 'Línea de construcción' } },
       { campo: 'fechaLanzamiento', label: 'Fecha de lanzamiento', nota: 'Informativa · no genera alertas', dashed: true,
         value: plan.fechaLanzamiento || (fechaLanzamientoCalc ? fechaLanzamientoCalc.fin : '') },
     ];
@@ -2893,6 +2917,7 @@
       <div class="plan-ancla-title">${PF.esc(c.label)}</div>
       <input type="date" class="form-control form-control-sm plan-fecha-hito" data-plan="${plan.id}" data-campo="${c.campo}" value="${c.value}" ${isAdmin() ? '' : 'disabled'}>
       <div class="plan-ancla-nota">${PF.esc(c.nota)}</div>
+      ${c.linea ? planLineaHtml(plan, c.linea) : ''}
     </div>`).join('');
 
     const filasHtml = items.map(({ ed, e, objetivo, estado }, idx) => {
@@ -3165,6 +3190,30 @@
       if (!plan) return;
       const updated = await DB.updatePlanProyecto(plan.id, { [inp.dataset.campo]: inp.value || null });
       if (updated) Object.assign(plan, updated);
+      renderPlanificacion();
+    }));
+    el.querySelectorAll('.plan-linea-monto').forEach((inp) => inp.addEventListener('change', async () => {
+      const plan = state.planProyectos.find((p) => p.id === inp.dataset.plan);
+      if (!plan) return;
+      const monto = inp.value === '' ? null : Number(inp.value);
+      const updated = await DB.updatePlanProyecto(plan.id, { [inp.dataset.campo]: monto });
+      if (updated) Object.assign(plan, updated);
+      renderPlanificacion();
+    }));
+    el.querySelectorAll('.plan-linea-btn').forEach((btn) => btn.addEventListener('click', async () => {
+      const plan = state.planProyectos.find((p) => p.id === btn.dataset.plan);
+      if (!plan) return;
+      if (btn.dataset.accion === 'confirmar') {
+        // Toma el valor que esté escrito en el input en este momento (por si el usuario lo
+        // cambió y todavía no disparó "change" al perder el foco) para no perder la corrección.
+        const inp = el.querySelector(`.plan-linea-monto[data-campo="${btn.dataset.montoCampo}"][data-plan="${btn.dataset.plan}"]`);
+        const monto = inp && inp.value !== '' ? Number(inp.value) : (plan[btn.dataset.montoCampo] ?? null);
+        const updated = await DB.updatePlanProyecto(plan.id, { [btn.dataset.montoCampo]: monto, [btn.dataset.campoConf]: true });
+        if (updated) Object.assign(plan, updated);
+      } else {
+        const updated = await DB.updatePlanProyecto(plan.id, { [btn.dataset.campoConf]: false });
+        if (updated) Object.assign(plan, updated);
+      }
       renderPlanificacion();
     }));
     el.querySelectorAll('.plan-encargado').forEach((inp) => inp.addEventListener('change', async () => {
