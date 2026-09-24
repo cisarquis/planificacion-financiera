@@ -6,6 +6,9 @@
       "indexes": "firestore.indexes.json"
     }
   ],
+  "storage": {
+    "rules": "storage.rules"
+  },
   "hosting": {
     "site": "planificacion-financiera-ingevec",
     "public": ".",
@@ -13,6 +16,7 @@
       "firebase.json",
       "firestore.rules",
       "firestore.indexes.json",
+      "storage.rules",
       ".firebaserc",
       ".git/**",
       ".gitignore",

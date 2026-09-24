@@ -2083,11 +2083,74 @@
           <label class="btn btn-outline-primary" for="imp-mode-presupuesto"><i class="bi bi-bookmark-check me-1"></i>Presupuesto (semestral)</label>
         </div>
       </div>
-      <div id="imp-body"></div>`;
+      <div id="imp-body"></div>
+      <div id="imp-historial"></div>`;
     el.querySelector('#imp-mode-unico').addEventListener('change', () => { importMode = 'unico'; renderImportarBody(); });
     el.querySelector('#imp-mode-maestro').addEventListener('change', () => { importMode = 'maestro'; renderImportarBody(); });
     el.querySelector('#imp-mode-presupuesto').addEventListener('change', () => { importMode = 'presupuesto'; renderImportarBody(); });
     renderImportarBody();
+    renderImportHistorial();
+  }
+
+  // Archivos .xlsx originales de importaciones "Archivo maestro" guardados en Storage (ver
+  // saveMasterImport) — permite descargarlos, "restaurar" uno viejo (reimportarlo con el mismo
+  // asistente de siempre) o borrarlo. Los de "Un proyecto"/"Presupuesto" no se archivan (serían
+  // demasiados) — solo el maestro, que es el que alimenta Resumen Directorio.
+  function renderImportHistorial() {
+    const el = document.getElementById('imp-historial');
+    if (!el) return;
+    const conArchivo = (state.importLog || []).filter((l) => l.archivoPath);
+    if (!conArchivo.length) { el.innerHTML = ''; return; }
+    const rows = conArchivo.map((l) => `<tr>
+      <td>${PF.esc(new Date(l.importedAt).toLocaleString('es-CL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }))}</td>
+      <td>${PF.esc(l.fileName || '—')}</td>
+      <td class="text-muted small">${PF.esc(l.byEmail || '—')}</td>
+      <td class="text-end">
+        <a class="btn btn-sm btn-outline-secondary" href="${l.archivoUrl}" target="_blank" rel="noopener" download="${PF.esc(l.fileName || 'archivo.xlsx')}"><i class="bi bi-download"></i> Descargar</a>
+        <button class="btn btn-sm btn-outline-primary imp-hist-restaurar" data-id="${l.id}" data-path="${PF.esc(l.archivoPath)}" data-name="${PF.esc(l.fileName || 'archivo.xlsx')}"><i class="bi bi-arrow-counterclockwise"></i> Restaurar</button>
+        <button class="btn btn-sm btn-outline-danger imp-hist-eliminar" data-id="${l.id}" data-path="${PF.esc(l.archivoPath)}"><i class="bi bi-trash"></i></button>
+      </td>
+    </tr>`).join('');
+    el.innerHTML = `
+      <div class="panel">
+        <h6>Archivos maestro guardados</h6>
+        <p class="text-muted small">El Excel original de cada importación "Archivo maestro" — descargalo, restauralo (lo vuelve a
+          pasar por el mismo asistente de importación) o eliminalo si ya no lo necesitás.</p>
+        <table class="table table-sm align-middle mb-0">
+          <thead><tr><th>Fecha</th><th>Archivo</th><th>Subido por</th><th></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+    el.querySelectorAll('.imp-hist-restaurar').forEach((btn) => btn.addEventListener('click', async () => {
+      if (!confirm(`¿Restaurar "${btn.dataset.name}"? Se va a volver a pasar por el asistente de importación, igual que si lo acabaras de subir.`)) return;
+      btn.disabled = true;
+      try {
+        const blob = await DB.getArchivoMaestroBlob(btn.dataset.path);
+        if (!blob) { toast('No se pudo encontrar el archivo guardado', 'danger'); return; }
+        const file = new File([blob], btn.dataset.name, { type: blob.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        importMode = 'maestro';
+        document.getElementById('imp-mode-maestro').checked = true;
+        renderImportarBody();
+        await handleMasterFile(file);
+      } catch (e) {
+        console.error(e); toast('No se pudo restaurar el archivo: ' + e.message, 'danger');
+      } finally {
+        btn.disabled = false;
+      }
+    }));
+    el.querySelectorAll('.imp-hist-eliminar').forEach((btn) => btn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar este archivo guardado? No afecta los datos ya importados, solo borra el Excel del historial.')) return;
+      btn.disabled = true;
+      try {
+        await DB.deleteArchivoMaestro(btn.dataset.path);
+        await DB.deleteImportLog(btn.dataset.id);
+        await loadAll();
+        toast('Archivo eliminado', 'danger');
+        renderImportHistorial();
+      } catch (e) {
+        console.error(e); toast('No se pudo eliminar: ' + e.message, 'danger');
+      }
+    }));
   }
 
   function renderImportarBody() {
@@ -2456,10 +2519,19 @@
         nuevos++;
       }
     }
-    await DB.addImportLog({
+    // Guarda el Excel original en Storage para el historial de "Archivos maestro guardados" —
+    // si por lo que sea falla la subida (sin conexión, cuota, etc.) no se pierde la importación
+    // en sí, solo queda sin archivo adjunto en el historial.
+    let archivo = null;
+    try {
+      archivo = await DB.uploadArchivoMaestro(masterState.file);
+    } catch (e) {
+      console.error(e); toast('Se importó, pero no se pudo guardar el Excel en el historial: ' + e.message, 'warning');
+    }
+    await DB.addImportLog(Object.assign({
       fileName: meta.fileName, sheet: meta.sheet,
       target: 'proyeccion', meses: mesesSet.size, byEmail: state.user ? state.user.email : 'local',
-    });
+    }, archivo ? { archivoPath: archivo.path, archivoUrl: archivo.url } : {}));
     await loadAll();
     masterState = null;
     toast(`Importación masiva: ${nuevos} proyectos nuevos, ${actualizados} actualizados`, 'success');

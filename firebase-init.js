@@ -22,16 +22,24 @@ import {
   getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, deleteDoc,
   query, orderBy, limit, serverTimestamp,
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
+import {
+  getStorage, ref, uploadBytes, getDownloadURL, getBlob, deleteObject,
+} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js';
 
 if (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey) {
   const app = initializeApp(window.FIREBASE_CONFIG);
   const auth = getAuth(app);
   const db = getFirestore(app, window.FIREBASE_DATABASE_ID || '(default)');
+  // Storage SÍ es un único bucket compartido con Mira (a diferencia de Firestore, que tiene
+  // bases separadas) — por eso todo lo que suba esta app va bajo el prefijo
+  // "planificacion-financiera/" (ver storage.rules), para no mezclarse con los archivos de Mira.
+  const storage = getStorage(app);
 
   window.__fb = {
-    app, auth, db,
+    app, auth, db, storage,
     collection, doc, getDoc, getDocs, setDoc, addDoc, deleteDoc,
     query, orderBy, limit, serverTimestamp,
     onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut,
+    ref, uploadBytes, getDownloadURL, getBlob, deleteObject,
   };
 }

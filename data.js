@@ -16,7 +16,13 @@
 //                              anioConstruccion, grupoPadre (opcional, agrupa sub-proyectos en
 //                              "Por proyecto" — ver app.js), ultimaImportacion, createdAt, updatedAt }
 //   cajaReal/{YYYY-MM}       { monto, nota }
-//   importLog/{id}           { projId, fileName, sheet, meses, importedAt, byEmail }
+//   importLog/{id}           { projId, fileName, sheet, meses, importedAt, byEmail,
+//                              archivoPath?, archivoUrl? } — los últimos 2 solo están en las
+//                              importaciones de "Archivo maestro": el .xlsx original queda en
+//                              Storage (bucket compartido con Mira, pero bajo el prefijo propio
+//                              "planificacion-financiera/archivosMaestro/", ver storage.rules)
+//                              para poder descargarlo, "restaurarlo" (reimportarlo) o borrarlo
+//                              desde la sección "Archivos maestro guardados" de Importar Excel.
 //   snapshots/{id}           { nombre, fecha, proyectos:[{id,categoriaId,nombre,proyeccion}] }
 //                            — versión guardada del flujo de caja (ej. "Directorio 2026-08-05"),
 //                            solo para ver/comparar en Resumen Directorio; append-only, no se edita.
@@ -142,6 +148,33 @@
     },
     async listImportLog() {
       return this._get('importLog', []);
+    },
+    async deleteImportLog(id) {
+      this._set('importLog', this._get('importLog', []).filter((l) => l.id !== id));
+    },
+
+    // Modo local no tiene Storage real: el archivo maestro se guarda como data URL en su propia
+    // clave de localStorage (no en la lista de importLog, para no arrastrar el archivo entero
+    // cada vez que se lee/escribe el log) — `path` es simplemente esa clave.
+    async uploadArchivoMaestro(file) {
+      const path = 'archivoMaestro_' + uid('');
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      this._set(path, dataUrl);
+      return { path, url: dataUrl };
+    },
+    async getArchivoMaestroBlob(path) {
+      const dataUrl = this._get(path, null);
+      if (!dataUrl) return null;
+      const res = await fetch(dataUrl);
+      return res.blob();
+    },
+    async deleteArchivoMaestro(path) {
+      try { localStorage.removeItem('pf_' + path); } catch (e) { /* localStorage puede no estar disponible */ }
     },
 
     async addSnapshot(nombre, proyectos) {
@@ -292,6 +325,30 @@
       const qs = await getDocs(query(collection(this.db, 'importLog'), orderBy('importedAt', 'desc'), limit(200)));
       return qs.docs.map((d) => Object.assign({ id: d.id }, d.data()));
     },
+    async deleteImportLog(id) {
+      const { doc, deleteDoc } = this.fb;
+      await deleteDoc(doc(this.db, 'importLog', id));
+    },
+
+    // Archivo Excel maestro original de una importación, en Storage — bajo un prefijo propio de
+    // esta app (comparte bucket con Mira, pero NO carpeta; ver storage.rules) para poder "volver
+    // atrás" (reimportarlo) o simplemente descargarlo/compararlo más adelante.
+    async uploadArchivoMaestro(file) {
+      const { storage, ref, uploadBytes, getDownloadURL } = this.fb;
+      const path = `planificacion-financiera/archivosMaestro/${Date.now()}_${file.name}`;
+      const fileRef = ref(storage, path);
+      await uploadBytes(fileRef, file);
+      const url = await getDownloadURL(fileRef);
+      return { path, url };
+    },
+    async getArchivoMaestroBlob(path) {
+      const { storage, ref, getBlob } = this.fb;
+      return getBlob(ref(storage, path));
+    },
+    async deleteArchivoMaestro(path) {
+      const { storage, ref, deleteObject } = this.fb;
+      await deleteObject(ref(storage, path));
+    },
 
     async addSnapshot(nombre, proyectos) {
       const { collection, addDoc } = this.fb;
@@ -409,7 +466,8 @@
     'listCategorias', 'addCategoria', 'updateCategoria', 'deleteCategoria',
     'listProyectos', 'getProyecto', 'addProyecto', 'updateProyecto', 'deleteProyecto',
     'getCajaReal', 'setCajaRealMes',
-    'addImportLog', 'listImportLog',
+    'addImportLog', 'listImportLog', 'deleteImportLog',
+    'uploadArchivoMaestro', 'getArchivoMaestroBlob', 'deleteArchivoMaestro',
     'addSnapshot', 'listSnapshots', 'getSnapshot', 'deleteSnapshot',
     'listPlanProyectos', 'addPlanProyecto', 'updatePlanProyecto', 'deletePlanProyecto',
     'getRole', 'listRoles', 'setRole', 'deleteRole',

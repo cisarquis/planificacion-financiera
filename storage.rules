@@ -1,0 +1,38 @@
+rules_version = '2';
+// Reglas de Firebase Storage para esta app. A diferencia de Firestore (que tiene una base de
+// datos propia, "planificacion-financiera", separada de la "(default)" que usa Mira), Storage es
+// UN SOLO bucket compartido con Mira (mira-87ec6.firebasestorage.app) — no existe el concepto de
+// "bucket con nombre" como en Firestore. El aislamiento acá es por PREFIJO de carpeta: todo lo
+// que sube esta app vive bajo "planificacion-financiera/", y estas reglas solo tocan ese prefijo
+// — nunca hay que ampliarlas a un match genérico que alcance archivos de Mira.
+//
+// El rol se resuelve consultando la base de Firestore "planificacion-financiera" (cross-service
+// rules, firestore.get()) — mismo esquema de roles/{email} que ya usan firestore.rules, para no
+// duplicar la fuente de verdad de quién es editor/dueño/lector.
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email.matches('.*@ingevec[.]cl$');
+    }
+    function myRole() {
+      return firestore.get(/databases/planificacion-financiera/documents/roles/$(request.auth.token.email)).data.role;
+    }
+    function hasRole() {
+      return isSignedIn() && myRole() in ['editor', 'lector', 'dueño'];
+    }
+    function isAdmin() {
+      return isSignedIn() && myRole() in ['editor', 'dueño'];
+    }
+
+    // Archivos Excel maestro originales (ver Importar Excel → "Archivos maestro guardados").
+    // Un lector puede ver/descargar; solo editor/dueño puede subir o borrar. Sin límite de tipo/
+    // tamaño de archivo a propósito: son los mismos .xlsx que ya se suben hoy sin restricción vía
+    // el importador.
+    match /planificacion-financiera/archivosMaestro/{fileName} {
+      allow read: if hasRole();
+      allow write: if isAdmin();
+    }
+  }
+}
