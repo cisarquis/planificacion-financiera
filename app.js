@@ -2462,7 +2462,7 @@
         const meses = Object.keys(r.proyeccion).length;
         const neto = Object.values(r.proyeccion).reduce((a, b) => a + b, 0);
         if (match) actualizados++; else nuevos++;
-        items.push({ categoriaId: s.categoriaId, nombre: r.nombre, tipo: r.tipo, proyeccion: r.proyeccion, matchId: match ? match.id : null, meses, neto });
+        items.push({ categoriaId: s.categoriaId, nombre: r.nombre, tipo: r.tipo, anioConstruccion: r.anioConstruccion || null, proyeccion: r.proyeccion, matchId: match ? match.id : null, meses, neto });
       });
     });
 
@@ -2473,12 +2473,14 @@
       return;
     }
 
+    const conAnio = items.filter((it) => it.anioConstruccion).length;
     const rowsHtml = items.map((it) => `
       <tr>
         <td>${PF.esc(it.nombre)}</td>
         <td class="text-muted small">${PF.esc(categoriaNombre(it.categoriaId))}${it.tipo ? ' · ' + PF.esc(it.tipo) : ''}</td>
         <td class="num">${it.meses}</td>
         <td class="num ${it.neto < 0 ? 'neg' : 'pos'}">${PF.fmtMoney(it.neto)}</td>
+        <td class="num">${it.anioConstruccion || '—'}</td>
         <td>${it.matchId ? '<span class="badge text-bg-secondary">Actualizar</span>' : '<span class="badge text-bg-success">Nuevo</span>'}</td>
       </tr>`).join('');
 
@@ -2487,11 +2489,11 @@
         <h6><span class="step-badge">3</span> Confirma e importa</h6>
         <div class="alert alert-info py-2">
           <b>${items.length}</b> proyectos detectados en <b>${mapped.length}</b> hoja(s):
-          <b class="pos">${nuevos} nuevos</b>, <b>${actualizados} a actualizar</b>.
+          <b class="pos">${nuevos} nuevos</b>, <b>${actualizados} a actualizar</b>${conAnio ? `, <b>${conAnio}</b> con Año Inicio de Obra` : ''}.
         </div>
         <div class="preview-grid mb-3">
           <table class="table table-sm mb-0">
-            <thead><tr><th>Proyecto</th><th>Categoría</th><th class="num">Meses</th><th class="num">Neto</th><th>Estado</th></tr></thead>
+            <thead><tr><th>Proyecto</th><th>Categoría</th><th class="num">Meses</th><th class="num">Neto</th><th class="num">Año inicio</th><th>Estado</th></tr></thead>
             <tbody>${rowsHtml}</tbody>
           </table>
         </div>
@@ -2509,13 +2511,20 @@
     const meta = { fileName: masterState.file.name, sheet: `maestro (${masterState.sheets.filter((s) => s.categoriaId).length} hojas)`, importedAt: Date.now() };
     for (const it of items) {
       Object.keys(it.proyeccion).forEach((m) => mesesSet.add(m));
+      // anioConstruccion: si el Excel trae un valor lo actualiza (es la fuente de verdad del
+      // archivo maestro real); si viene en blanco no se toca, para no borrar una corrección
+      // manual ya hecha en "Por proyecto" (ver AGENTS.md → Resumen Directorio → grupoObraDe).
       if (it.matchId) {
         const existing = state.proyectos.find((p) => p.id === it.matchId);
         const merged = Object.assign({}, existing ? existing.proyeccion : {}, it.proyeccion);
-        await DB.updateProyecto(it.matchId, { proyeccion: merged, tipo: it.tipo || (existing && existing.tipo) || '', ultimaImportacion: meta });
+        const patch = { proyeccion: merged, tipo: it.tipo || (existing && existing.tipo) || '', ultimaImportacion: meta };
+        if (it.anioConstruccion) patch.anioConstruccion = it.anioConstruccion;
+        await DB.updateProyecto(it.matchId, patch);
         actualizados++;
       } else {
-        await DB.addProyecto({ nombre: it.nombre, categoriaId: it.categoriaId, moneda: state.config.moneda, tipo: it.tipo, proyeccion: it.proyeccion, ultimaImportacion: meta });
+        const nuevo = { nombre: it.nombre, categoriaId: it.categoriaId, moneda: state.config.moneda, tipo: it.tipo, proyeccion: it.proyeccion, ultimaImportacion: meta };
+        if (it.anioConstruccion) nuevo.anioConstruccion = it.anioConstruccion;
+        await DB.addProyecto(nuevo);
         nuevos++;
       }
     }

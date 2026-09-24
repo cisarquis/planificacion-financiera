@@ -133,12 +133,28 @@
     return cols;
   }
 
-  // Extrae { nombre, tipo, proyeccion } de cada fila de proyecto bajo la fila de encabezado.
-  // Descarta filas sin nombre y filas sin ninguna celda numérica real en las columnas de mes
-  // (esto filtra filas de título/rótulo repetidas, que no tienen números, sin descartar
-  // proyectos con flujo en cero explícito).
+  // Columna opcional "Año Inicio de Obra" (agregada al archivo maestro real en jul-2026, ver
+  // AGENTS.md/Resumen Directorio → `anioConstruccion`) — la busca por texto de encabezado, no por
+  // posición fija, porque vive en la fila de rótulos (Nombre/Tipo/Año Inicio de Obra) justo
+  // debajo de la fila de meses, no en una posición de columna garantizada. Si el archivo no la
+  // trae (formato viejo), simplemente no se encuentra y no afecta nada.
+  function anioObraColumn(grid, headerRow) {
+    for (let r = headerRow; r <= headerRow + 2 && r < grid.length; r++) {
+      const row = grid[r] || [];
+      for (let c = 0; c < row.length; c++) {
+        if (typeof row[c] === 'string' && /a[ñn]o.*inicio.*obra/i.test(row[c])) return c;
+      }
+    }
+    return -1;
+  }
+
+  // Extrae { nombre, tipo, anioConstruccion, proyeccion } de cada fila de proyecto bajo la fila
+  // de encabezado. Descarta filas sin nombre y filas sin ninguna celda numérica real en las
+  // columnas de mes (esto filtra filas de título/rótulo repetidas, que no tienen números, sin
+  // descartar proyectos con flujo en cero explícito).
   function extractMasterRows(grid, headerRow) {
     const cols = monthColumns(grid, headerRow);
+    const anioCol = anioObraColumn(grid, headerRow);
     const rows = [];
     for (let r = headerRow + 1; r < grid.length; r++) {
       const row = grid[r] || [];
@@ -152,7 +168,11 @@
         if (typeof v === 'number' && !isNaN(v)) { proyeccion[key] = (proyeccion[key] || 0) + v; any = true; }
       });
       if (!any) continue;
-      rows.push({ nombre, tipo, proyeccion });
+      // En blanco = no tocar el campo (no se envía anioConstruccion en absoluto), para no
+      // pisar con `undefined`/0 un valor que el usuario ya haya corregido a mano en la app.
+      const anioVal = anioCol >= 0 ? row[anioCol] : null;
+      const anioConstruccion = typeof anioVal === 'number' && !isNaN(anioVal) ? Math.round(anioVal) : null;
+      rows.push(Object.assign({ nombre, tipo, proyeccion }, anioConstruccion ? { anioConstruccion } : {}));
     }
     return { cols, rows };
   }
