@@ -1400,10 +1400,12 @@
     const acumActualObra = []; let accAO = 0; totalActualObra.forEach((v) => { accAO += v; acumActualObra.push(accAO); });
     const acumPptoObra = []; let accPO = 0; totalPptoObra.forEach((v) => { accPO += v; acumPptoObra.push(accPO); });
 
-    // Sección "Inversión en obras" (2 gráficos + tabla), siempre anual y acotada a
-    // 2026-2028 sin importar la granularidad de la vista — es el rango y grano que pidió
-    // el usuario para esta sección específica (viene del PPTX original del directorio).
-    const obraAnualBuckets = periodBuckets(months, 'anual').filter((b) => {
+    // Sección "Inversión en obras" (2 gráficos + tabla), siempre semestral y acotada a
+    // 2026-2028 sin importar la granularidad elegida arriba para la tabla por categoría —
+    // es el rango y grano que pidió el usuario para esta sección específica (el nombre de la
+    // variable quedó "obraAnualBuckets" por compatibilidad con el resto del código, pero ya no
+    // agrupa por año sino por semestre).
+    const obraAnualBuckets = periodBuckets(months, 'semestral').filter((b) => {
       const anio = Number(b.months[0].slice(0, 4));
       return anio >= OBRA_CHART_ANIO_DESDE && anio <= OBRA_CHART_ANIO_HASTA;
     });
