@@ -1549,7 +1549,7 @@
           <div class="panel-header-row">
             <div>
               <h3>Inversión en obras del período</h3>
-              <p class="panel-hint">Egresos por año, en UF. Una sola escala.</p>
+              <p class="panel-hint">Flujo neto por semestre, en UF — mismas cifras que la tabla de abajo.</p>
             </div>
             <div class="chart-legend">
               <span class="chart-legend-item"><span class="swatch-sq" style="background:#2563eb"></span>Actual</span>
@@ -1618,10 +1618,10 @@
         } catch (e) { /* anotación visual: no debe romper el render si cambian los internals de Chart.js */ }
       }
       if (obraAnualLabels.length) {
-        PFCharts.barInversionPeriodo('chart-obra-periodo', obraAnualLabels, obraNuevaActualAnual.map(Math.abs), obraNuevaPptoAnual.map(Math.abs));
+        PFCharts.barInversionPeriodo('chart-obra-periodo', obraAnualLabels, obraNuevaActualAnual, obraNuevaPptoAnual);
         // La brecha actual vs. ppto se muestra en el tooltip nativo del chart (al pasar el
         // mouse), no en una caja fija — ver lineInversionAcumulada en charts.js.
-        PFCharts.lineInversionAcumulada('chart-obra-acum', obraAnualLabels, obraNuevaAcumActual.map(Math.abs), obraNuevaAcumPpto.map(Math.abs));
+        PFCharts.lineInversionAcumulada('chart-obra-acum', obraAnualLabels, obraNuevaAcumActual, obraNuevaAcumPpto);
       }
     }
 
