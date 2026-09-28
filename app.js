@@ -1428,12 +1428,12 @@
     const obraNuevaProyectos = inversionProyectos.filter((p) => obrasGruposEnRango.has(grupoObraDe(p)));
     const obraActivosProyectos = inversionProyectos.filter((p) => !obrasGruposEnRango.has(grupoObraDe(p)));
 
-    // Los 2 gráficos de arriba muestran el flujo de TODAS las obras de esas 4 categorías dentro
-    // del rango visible — tanto las que arrancan en 2026-2028 como las que ya venían de antes
-    // (`obraActivosProyectos`) siguen invirtiendo en ese período y deben sumar acá — acumulada
-    // pura desde cero (sin Caja inicial), para que coincida con el desglose de la tabla de abajo.
-    const obraNuevaActualAnual = obraAnualBuckets.map((b) => sumField(inversionProyectos, b.months, 'proyeccion'));
-    const obraNuevaPptoAnual = obraAnualBuckets.map((b) => sumField(inversionProyectos, b.months, 'presupuesto'));
+    // Los 2 gráficos de arriba muestran SOLO la línea "Flujo obras 2026 a 2028" (`obraNuevaProyectos`
+    // — obras de esas 4 categorías cuyo grupoObra cae en ese rango de años), no el total de la
+    // tabla de abajo (que además suma `obraActivosProyectos`) — acumulada pura desde cero (sin
+    // Caja inicial), para que coincidan exactamente con esa fila puntual de la tabla.
+    const obraNuevaActualAnual = obraAnualBuckets.map((b) => sumField(obraNuevaProyectos, b.months, 'proyeccion'));
+    const obraNuevaPptoAnual = obraAnualBuckets.map((b) => sumField(obraNuevaProyectos, b.months, 'presupuesto'));
     const obraNuevaAcumActual = []; let accONA = 0; obraNuevaActualAnual.forEach((v) => { accONA += v; obraNuevaAcumActual.push(accONA); });
     const obraNuevaAcumPpto = []; let accONP = 0; obraNuevaPptoAnual.forEach((v) => { accONP += v; obraNuevaAcumPpto.push(accONP); });
 
@@ -1549,7 +1549,7 @@
           <div class="panel-header-row">
             <div>
               <h3>Inversión en obras del período</h3>
-              <p class="panel-hint">Flujo neto por semestre, en UF — mismas cifras que la tabla de abajo.</p>
+              <p class="panel-hint">Flujo neto por semestre, en UF — misma cifra que "Flujo obras 2026 a 2028" en la tabla de abajo.</p>
             </div>
             <div class="chart-legend">
               <span class="chart-legend-item"><span class="swatch-sq" style="background:#2563eb"></span>Actual</span>

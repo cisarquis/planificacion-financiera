@@ -426,10 +426,9 @@ Financiamiento" para que una categoría nueva no entre acá sin que alguien lo d
   por punto en `opts.plugins.tooltip.callbacks.afterBody` y aparece solo en el tooltip nativo de
   Chart.js al pasar el mouse (una caja fija tapaba la línea y quedaba "pegada" siempre en el mismo
   lugar, independiente de qué tan ancho se renderizara el chart).
-  **Estos 2 gráficos usan TODO `inversionProyectos`** dentro del rango visible — tanto las obras que
-  arrancan en 2026-2028 como las que ya estaban activas desde antes (`obraActivosProyectos`) siguen
-  invirtiendo en ese período y suman acá —, acumulada pura desde cero, **sin** `cajaInicial` — a
-  propósito, para que reconcilien exactamente con la tabla de abajo.
+  **Estos 2 gráficos usan solo `obraNuevaProyectos`** (la línea "Flujo obras 2026 a 2028", no el
+  total de la tabla ni `obraActivosProyectos`), acumulada pura desde cero, **sin** `cajaInicial` —
+  a propósito, para que reconcilien exactamente con esa fila puntual de la tabla de abajo.
 - **Tabla "Actual, presupuesto y desviación por año"**: `Concepto` + 3 columnas (Actual/Ppto/Δ) por
   semestre, 2 líneas + fila total + fila acumulada (clase `.total-row`, reutilizada), botón
   "Exportar Excel" propio (`#resumen-obra-excel`, separado del de la tabla por categoría). Las 2
