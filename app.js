@@ -992,6 +992,11 @@
   const CAT_FINANCIAMIENTO = 'Financiamiento, Dividendo e Impuestos';
   const OBRA_CHART_ANIO_DESDE = 2026;
   const OBRA_CHART_ANIO_HASTA = 2028;
+  // Categorías que cuentan como "inversión" en la sección "Inversión en obras" (2 gráficos +
+  // tabla de Resumen Directorio) — a propósito una lista explícita en vez de "todo lo que no sea
+  // Financiamiento", para que esa sección no arrastre ninguna categoría nueva que se agregue más
+  // adelante sin que alguien lo decida a propósito.
+  const CATEGORIAS_INVERSION = ['Inmobiliaria Ingevec', 'Inmobiliarias Asociadas', 'Inv. y Rentas', 'Otros'];
 
   // Infiere el "grupo de obra" (año de inicio) de un proyecto a partir del primer aporte relevante
   // de su proyección — umbral = el mayor entre 500 UF y 10% del máximo aporte absoluto del propio
@@ -1413,28 +1418,32 @@
 
     const obrasGruposEnRango = new Set();
     for (let y = OBRA_CHART_ANIO_DESDE; y <= OBRA_CHART_ANIO_HASTA; y++) obrasGruposEnRango.add('Obras ' + y);
-    const obraNuevaProyectos = obraProyectos.filter((p) => obrasGruposEnRango.has(grupoObraDe(p)));
-    const obraActivosProyectos = obraProyectos.filter((p) => !obrasGruposEnRango.has(grupoObraDe(p)));
-    const finProyectos = finCat ? state.proyectos.filter((p) => p.categoriaId === finCat.id) : [];
-    const bonoFProyectos = finProyectos.filter((p) => (p.tipo || '') === 'Bono F');
-    const finCorpProyectos = finProyectos.filter((p) => (p.tipo || '') !== 'Bono F');
+    // "Las inversiones" (2 gráficos + tabla de abajo) solo miran estas 4 categorías — nunca
+    // Financiamiento/Dividendo e Impuestos, a diferencia de "Flujo de Obras por año de inicio"
+    // (la tabla de arriba, `obraProyectos`), que sigue siendo "todo excepto Financiamiento".
+    const catsInversionIds = new Set(state.categorias
+      .filter((c) => CATEGORIAS_INVERSION.some((n) => PFImporter.normalizeLabel(n) === PFImporter.normalizeLabel(c.nombre)))
+      .map((c) => c.id));
+    const inversionProyectos = obraProyectos.filter((p) => catsInversionIds.has(p.categoriaId));
+    const obraNuevaProyectos = inversionProyectos.filter((p) => obrasGruposEnRango.has(grupoObraDe(p)));
+    const obraActivosProyectos = inversionProyectos.filter((p) => !obrasGruposEnRango.has(grupoObraDe(p)));
 
-    // Los 2 gráficos de arriba muestran solo la línea "obras nuevas 2026-2028" (no el
-    // consolidado de las 4 líneas), acumulada pura desde cero (sin Caja inicial) — así
-    // reconcilian con el desglose de la tabla de abajo.
-    const obraNuevaActualAnual = obraAnualBuckets.map((b) => sumField(obraNuevaProyectos, b.months, 'proyeccion'));
-    const obraNuevaPptoAnual = obraAnualBuckets.map((b) => sumField(obraNuevaProyectos, b.months, 'presupuesto'));
+    // Los 2 gráficos de arriba muestran el flujo de TODAS las obras de esas 4 categorías dentro
+    // del rango visible — tanto las que arrancan en 2026-2028 como las que ya venían de antes
+    // (`obraActivosProyectos`) siguen invirtiendo en ese período y deben sumar acá — acumulada
+    // pura desde cero (sin Caja inicial), para que coincida con el desglose de la tabla de abajo.
+    const obraNuevaActualAnual = obraAnualBuckets.map((b) => sumField(inversionProyectos, b.months, 'proyeccion'));
+    const obraNuevaPptoAnual = obraAnualBuckets.map((b) => sumField(inversionProyectos, b.months, 'presupuesto'));
     const obraNuevaAcumActual = []; let accONA = 0; obraNuevaActualAnual.forEach((v) => { accONA += v; obraNuevaAcumActual.push(accONA); });
     const obraNuevaAcumPpto = []; let accONP = 0; obraNuevaPptoAnual.forEach((v) => { accONP += v; obraNuevaAcumPpto.push(accONP); });
 
-    // Tabla de abajo: 4 líneas (obras nuevas + activos + Financiero Corp + Bono F) + total +
-    // acumulado; el acumulado sí parte de Configuración > Caja inicial (igual que Consolidado
-    // y Flujo de Caja mensual), a diferencia del acumulado de los 2 gráficos de arriba.
+    // Tabla de abajo: 2 líneas (obras activas desde antes + obras nuevas 2026-2028, ambas ya
+    // acotadas a las 4 categorías de inversión) + total + acumulado; el acumulado sí parte de
+    // Configuración > Caja inicial (igual que Consolidado y Flujo de Caja mensual), a diferencia
+    // del acumulado de los 2 gráficos de arriba.
     const lineasTablaObra = [
       { nombre: 'Flujo proyectos activos a diciembre 2025', proys: obraActivosProyectos },
       { nombre: `Flujo obras ${OBRA_CHART_ANIO_DESDE} a ${OBRA_CHART_ANIO_HASTA}`, proys: obraNuevaProyectos },
-      { nombre: 'Flujo Financiero Corp', proys: finCorpProyectos },
-      { nombre: 'Bono F (aportes y amortizaciones e intereses)', proys: bonoFProyectos },
     ].map((l) => ({
       nombre: l.nombre,
       actual: obraAnualBuckets.map((b) => sumField(l.proys, b.months, 'proyeccion')),

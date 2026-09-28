@@ -408,35 +408,36 @@ drag-and-drop no se vería reflejada); soltar sobre "Sin clasificar" limpia `ani
 que vuelva a mandar `grupoObra`/la heurística. `ensureGruposObra` (clasificación automática
 perezosa al entrar a la vista) solo toca proyectos que **no** tienen ni `grupoObra` ni
 `anioConstruccion` todavía, para no pisar ninguna de las dos formas de corrección manual.
-**Sección "Inversión en obras"** (2 gráficos + 1 tabla, siempre **anual y acotada a 2026-2028**
+**Sección "Inversión en obras"** (2 gráficos + 1 tabla, siempre **semestral y acotada a 2026-2028**
 — constantes `OBRA_CHART_ANIO_DESDE`/`_HASTA` en `app.js` — sin importar la granularidad elegida
-arriba para la tabla por categoría; `obraAnualBuckets = periodBuckets(months, 'anual')` filtrado a
-ese rango de años):
+arriba para la tabla por categoría; `obraAnualBuckets = periodBuckets(months, 'semestral')`
+filtrado a ese rango de años; el nombre de la variable quedó de cuando era anual). A diferencia de
+"Flujo de Obras por año de inicio" (la tabla de arriba, que usa `obraProyectos` = todo excepto
+Financiamiento), esta sección **solo considera 4 categorías explícitas** (`CATEGORIAS_INVERSION`:
+Inmobiliaria Ingevec, Inmobiliarias Asociadas, Inv. y Rentas, Otros — nunca Financiamiento/Dividendo
+e Impuestos) vía `inversionProyectos`, una lista a propósito en vez de "todo lo que no sea
+Financiamiento" para que una categoría nueva no entre acá sin que alguien lo decida:
 - **"Inversión en obras del período"** (`PFCharts.barInversionPeriodo`): barras agrupadas Actual vs
-  Presupuesto por año, con el valor de cada barra dibujado encima/debajo vía un plugin de Chart.js
-  inline (sin librería de datalabels externa).
+  Presupuesto por semestre, con el valor de cada barra dibujado encima/debajo vía un plugin de
+  Chart.js inline (sin librería de datalabels externa).
 - **"Inversión acumulada"** (`PFCharts.lineInversionAcumulada`): línea Actual sólida vs Ppto punteada,
   con el área entre ambas rellena (`fill: 0` de Chart.js apuntando al dataset de Ppto, nativo, sin
   plugin). La brecha ("X UF sobre/bajo el PPTO") **no** se dibuja fija sobre el gráfico — se calcula
   por punto en `opts.plugins.tooltip.callbacks.afterBody` y aparece solo en el tooltip nativo de
   Chart.js al pasar el mouse (una caja fija tapaba la línea y quedaba "pegada" siempre en el mismo
   lugar, independiente de qué tan ancho se renderizara el chart).
-  **Estos 2 gráficos usan solo la línea "obras nuevas 2026-2028"** (`obraNuevaProyectos` — ver abajo),
-  acumulada pura desde cero, **sin** `cajaInicial` — a propósito, para que reconcilien exactamente
-  con la fila "Flujo obras 2026 a 2028" de la tabla de abajo.
+  **Estos 2 gráficos usan TODO `inversionProyectos`** dentro del rango visible — tanto las obras que
+  arrancan en 2026-2028 como las que ya estaban activas desde antes (`obraActivosProyectos`) siguen
+  invirtiendo en ese período y suman acá —, acumulada pura desde cero, **sin** `cajaInicial` — a
+  propósito, para que reconcilien exactamente con la tabla de abajo.
 - **Tabla "Actual, presupuesto y desviación por año"**: `Concepto` + 3 columnas (Actual/Ppto/Δ) por
-  año, 4 líneas + fila total + fila acumulada (clase `.total-row`, reutilizada), botón "Exportar
-  Excel" propio (`#resumen-obra-excel`, separado del de la tabla por categoría). Las 4 líneas:
-  - **Flujo obras 2026 a 2028**: proyectos de Flujo de Obras (`obraProyectos`, ya excluye
-    Financiamiento) cuyo `grupoObra` cae en ese rango de años.
-  - **Flujo proyectos activos a diciembre 2025**: el resto de `obraProyectos` (`grupoObra` "Sin
-    clasificar" o fuera del rango) — proyectos sin un aporte nuevo detectado en 2026-2028.
-  - **Flujo Financiero Corp** / **Bono F**: split de la categoría Financiamiento por el campo `tipo`
-    del proyecto — `tipo === 'Bono F'` (bono F y sus intereses) va a la fila Bono F, todo lo demás
-    (otros bonos, factoring, CxP relacionadas, FOGAES, dividendos, impuestos, etc.) va a Financiero
-    Corp. Este split viene directo del archivo maestro real (columna "tipo" de la hoja
-    "FINANCIAMIENTO, DIVIDENDOS, IMP"), no es inventado.
-  - **Flujo de caja** / **Flujo de caja acumulado**: suma de las 4 líneas; a diferencia de los 2
+  semestre, 2 líneas + fila total + fila acumulada (clase `.total-row`, reutilizada), botón
+  "Exportar Excel" propio (`#resumen-obra-excel`, separado del de la tabla por categoría). Las 2
+  líneas (ambas ya acotadas a `inversionProyectos`, las 4 categorías de inversión):
+  - **Flujo obras 2026 a 2028**: las que `grupoObraDe` clasifica dentro de ese rango de años.
+  - **Flujo proyectos activos a diciembre 2025**: el resto (`grupoObra` "Sin clasificar" o fuera
+    del rango) — proyectos sin un aporte nuevo detectado en 2026-2028.
+  - **Flujo de caja** / **Flujo de caja acumulado**: suma de las 2 líneas; a diferencia de los 2
     gráficos de arriba, el acumulado de **esta tabla sí** parte de `state.config.cajaInicial` (mismo
     campo que usan Consolidado y Flujo de Caja mensual) — es la única excepción en todo Resumen
     Directorio, que por lo demás deliberadamente no usa caja inicial para que Actual y Ppto sean
