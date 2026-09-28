@@ -1899,13 +1899,31 @@
           </div>
           <div class="dash-year-chips" style="margin-bottom:0"><span class="text-muted small me-1">Estado:</span>${estadoChips}</div>
         </div>
-        ${isAdmin() ? '<button class="btn btn-sm btn-primary" id="btn-nuevo-proj"><i class="bi bi-plus-lg"></i> Nuevo proyecto</button>' : ''}
+        ${isAdmin() ? `<div class="d-flex gap-2">
+          <button class="btn btn-sm btn-outline-danger" id="btn-reset-anios" title="Vuelve el Año de construcción de todos los proyectos a 2025, para completarlo de nuevo"><i class="bi bi-arrow-counterclockwise"></i> Restablecer años de construcción</button>
+          <button class="btn btn-sm btn-primary" id="btn-nuevo-proj"><i class="bi bi-plus-lg"></i> Nuevo proyecto</button>
+        </div>` : ''}
       </div>
       ${porCat || '<div class="text-muted small">Ningún proyecto coincide con el filtro.</div>'}
       ${sinCat.length ? `<div class="mb-3"><div class="fw-semibold mb-2 text-muted">Sin categoría</div>
         <div class="row g-2">${proyectosGridHtml(sinCat)}</div></div>` : ''}`;
 
     if (isAdmin()) document.getElementById('btn-nuevo-proj').addEventListener('click', () => nuevoProyectoDialog());
+    const resetAniosBtn = document.getElementById('btn-reset-anios');
+    if (resetAniosBtn) {
+      resetAniosBtn.addEventListener('click', async () => {
+        if (!confirm(`¿Restablecer el Año de construcción de los ${state.proyectos.length} proyectos a 2025? Van a quedar todos en 2025 hasta que los vuelvas a completar uno por uno (o importando el archivo maestro con la columna "Año Inicio de Obra").`)) return;
+        resetAniosBtn.disabled = true;
+        try {
+          await Promise.all(state.proyectos.map((p) => DB.updateProyecto(p.id, { anioConstruccion: 2025 })));
+          await loadAll();
+          toast('Años de construcción restablecidos a 2025', 'success');
+          renderProyectos();
+        } finally {
+          resetAniosBtn.disabled = false;
+        }
+      });
+    }
     el.querySelectorAll('[data-estado-filtro]').forEach((btn) => btn.addEventListener('click', () => {
       proyectosEstadoFiltro = btn.dataset.estadoFiltro;
       renderProyectos();
